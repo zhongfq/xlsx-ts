@@ -53,7 +53,10 @@
 - `workbook.getSheets()`
 - `workbook.getSheet(name)`
 - `sheet.getCell(address)`
+- `sheet.getRange(range)`
+- `sheet.getUsedRange()`
 - `sheet.setCell(address, value)`
+- `sheet.setRange(startAddress, values)`
 - `sheet.getFormula(address)`
 - `sheet.setFormula(address, formula, options?)`
 - `workbook.save(path)`
@@ -65,6 +68,10 @@ const workbook = await Workbook.open("input.xlsx");
 const sheet = workbook.getSheet("Sheet1");
 
 sheet.setCell("A1", "Hello");
+sheet.setRange("B2", [
+  [1, 2],
+  [3, 4],
+]);
 sheet.setFormula("B1", "SUM(1,2)", { cachedValue: 3 });
 
 await workbook.save("output.xlsx");

@@ -95,6 +95,32 @@ test("formula cells can be read and updated without dropping styles", async () =
   assert.match(sheetXml, /<v>Hello<\/v>/);
 });
 
+test("range APIs read and write rectangular values", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = await loadFixtureEntries(fixtureDir);
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  assert.equal(sheet.getUsedRange(), "A1");
+  assert.deepEqual(sheet.getRange("A1:B2"), [["Hello", null], [null, null]]);
+
+  sheet.setRange("B2", [
+    [1, 2],
+    [3, 4],
+  ]);
+
+  assert.equal(sheet.getUsedRange(), "A1:C3");
+  assert.deepEqual(sheet.getRange("A1:C3"), [
+    ["Hello", null, null],
+    [null, 1, 2],
+    [null, 3, 4],
+  ]);
+
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.match(sheetXml, /<row r="2"><c r="B2"><v>1<\/v><\/c><c r="C2"><v>2<\/v><\/c><\/row>/);
+  assert.match(sheetXml, /<row r="3"><c r="B3"><v>3<\/v><\/c><c r="C3"><v>4<\/v><\/c><\/row>/);
+});
+
 async function loadFixtureEntries(rootDirectory: string): Promise<Array<{ path: string; data: Uint8Array }>> {
   const entries: Array<{ path: string; data: Uint8Array }> = [];
   const stack = [rootDirectory];

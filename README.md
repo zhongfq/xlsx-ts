@@ -23,6 +23,8 @@
      - 读取工作表列表
      - 读取单元格
      - 修改单元格
+     - 读取公式
+     - 修改公式
    - 样式依赖的 `s="..."` 属性保留不动，因此样式不会因为写值被丢掉。
 
 ## 为什么这条路线适合“保样式”
@@ -52,6 +54,8 @@
 - `workbook.getSheet(name)`
 - `sheet.getCell(address)`
 - `sheet.setCell(address, value)`
+- `sheet.getFormula(address)`
+- `sheet.setFormula(address, formula, options?)`
 - `workbook.save(path)`
 
 示例：
@@ -61,15 +65,22 @@ const workbook = await Workbook.open("input.xlsx");
 const sheet = workbook.getSheet("Sheet1");
 
 sheet.setCell("A1", "Hello");
+sheet.setFormula("B1", "SUM(1,2)", { cachedValue: 3 });
 
 await workbook.save("output.xlsx");
 ```
+
+说明：
+
+- 同一张工作表首次读写时会扫描一次 `sheetData`，建立单元格与行的位置索引
+- 后续 `getCell` / `getFormula` 会直接走索引查找，不再每次整张表做字符串匹配
+- 每次写入后会重建该表索引，保证后续读取拿到的是最新结果
 
 ## 当前限制
 
 - zip 读写后端暂时依赖系统里的 `python3` 与 `zip`
 - 字符串写入使用 `inlineStr`，避免为了简单写值而重建 `sharedStrings.xml`
-- 公式、合并单元格、批注、富文本、图片等 API 还没加
+- 合并单元格、批注、富文本、图片等 API 还没加
 - 对 XML 的写入是“局部 patch”，不是完整 OOXML 模型
 
 ## 开发

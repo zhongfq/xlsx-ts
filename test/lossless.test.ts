@@ -48,6 +48,53 @@ test("editing a styled cell keeps its style index and leaves styles.xml untouche
   assert.equal(stylesXml, originalStyles);
 });
 
+test("sheet reads stay coherent after repeated writes", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = await loadFixtureEntries(fixtureDir);
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.setCell("B1", 1);
+  assert.equal(sheet.getCell("B1"), 1);
+
+  sheet.setCell("B1", 2);
+  assert.equal(sheet.getCell("B1"), 2);
+
+  sheet.setCell("A2", "Tail");
+  assert.equal(sheet.getCell("A2"), "Tail");
+});
+
+test("formula cells can be read and updated without dropping styles", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" s="1"><f>SUM(1,2)</f><v>3</v></c>
+    </row>
+  </sheetData>
+</worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  assert.equal(sheet.getFormula("A1"), "SUM(1,2)");
+  assert.equal(sheet.getCell("A1"), 3);
+
+  sheet.setFormula("A1", 'CONCAT("He","llo")', { cachedValue: "Hello" });
+
+  assert.equal(sheet.getFormula("A1"), 'CONCAT("He","llo")');
+  assert.equal(sheet.getCell("A1"), "Hello");
+
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.match(sheetXml, /<c r="A1" t="str" s="1">/);
+  assert.match(sheetXml, /<f>CONCAT\(&quot;He&quot;,&quot;llo&quot;\)<\/f>/);
+  assert.match(sheetXml, /<v>Hello<\/v>/);
+});
+
 async function loadFixtureEntries(rootDirectory: string): Promise<Array<{ path: string; data: Uint8Array }>> {
   const entries: Array<{ path: string; data: Uint8Array }> = [];
   const stack = [rootDirectory];
@@ -102,4 +149,30 @@ function entryText(entries: Array<{ path: string; data: Uint8Array }>, path: str
   }
 
   return Buffer.from(entry.data).toString("utf8");
+}
+
+function replaceEntryText(
+  entries: Array<{ path: string; data: Uint8Array }>,
+  path: string,
+  text: string,
+): Array<{ path: string; data: Uint8Array }> {
+  const encoder = new TextEncoder();
+  let replaced = false;
+  const nextEntries = entries.map((entry) => {
+    if (entry.path !== path) {
+      return entry;
+    }
+
+    replaced = true;
+    return {
+      path,
+      data: encoder.encode(text),
+    };
+  });
+
+  if (!replaced) {
+    throw new Error(`Missing entry for replacement: ${path}`);
+  }
+
+  return nextEntries;
 }

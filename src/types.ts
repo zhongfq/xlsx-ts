@@ -4,3 +4,7 @@ export interface ArchiveEntry {
 }
 
 export type CellValue = string | number | boolean | null;
+
+export interface SetFormulaOptions {
+  cachedValue?: CellValue;
+}

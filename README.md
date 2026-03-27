@@ -55,8 +55,11 @@
 - `sheet.getCell(address)`
 - `sheet.getRange(range)`
 - `sheet.getUsedRange()`
+- `sheet.getMergedRanges()`
 - `sheet.setCell(address, value)`
 - `sheet.setRange(startAddress, values)`
+- `sheet.addMergedRange(range)`
+- `sheet.removeMergedRange(range)`
 - `sheet.getFormula(address)`
 - `sheet.setFormula(address, formula, options?)`
 - `workbook.save(path)`
@@ -72,6 +75,7 @@ sheet.setRange("B2", [
   [1, 2],
   [3, 4],
 ]);
+sheet.addMergedRange("D1:E1");
 sheet.setFormula("B1", "SUM(1,2)", { cachedValue: 3 });
 
 await workbook.save("output.xlsx");

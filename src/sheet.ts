@@ -154,6 +154,10 @@ export class Sheet {
     return formatRangeRef(minRow, minColumn, maxRow, maxColumn);
   }
 
+  getMergedRanges(): string[] {
+    return parseMergedRanges(this.getSheetIndex().xml);
+  }
+
   setCell(address: string, value: CellValue): void {
     const normalizedAddress = normalizeCellAddress(address);
     const existingCell = this.getSheetIndex().cells.get(normalizedAddress);
@@ -175,6 +179,22 @@ export class Sheet {
         existingCell?.attributesSource,
       ),
     );
+  }
+
+  addMergedRange(range: string): void {
+    const normalizedRange = normalizeRangeRef(range);
+    const ranges = this.getMergedRanges();
+    if (ranges.includes(normalizedRange)) {
+      return;
+    }
+
+    this.writeSheetXml(updateMergedRanges(this.getSheetIndex().xml, [...ranges, normalizedRange]));
+  }
+
+  removeMergedRange(range: string): void {
+    const normalizedRange = normalizeRangeRef(range);
+    const ranges = this.getMergedRanges().filter((candidate) => candidate !== normalizedRange);
+    this.writeSheetXml(updateMergedRanges(this.getSheetIndex().xml, ranges));
   }
 
   setRange(startAddress: string, values: CellValue[][]): void {
@@ -221,6 +241,10 @@ export class Sheet {
       ? index.xml.slice(0, existingCell.start) + cellXml + index.xml.slice(existingCell.end)
       : insertCell(index, address, cellXml);
 
+    this.writeSheetXml(nextSheetXml);
+  }
+
+  private writeSheetXml(nextSheetXml: string): void {
     this.workbook.writeEntryText(this.path, nextSheetXml);
     this.sheetIndex = buildSheetIndex(nextSheetXml);
   }
@@ -464,6 +488,11 @@ function normalizeCellAddress(address: string): string {
   return address.toUpperCase();
 }
 
+function normalizeRangeRef(range: string): string {
+  const { startRow, endRow, startColumn, endColumn } = parseRangeRef(range);
+  return formatRangeRef(startRow, startColumn, endRow, endColumn);
+}
+
 function parseRangeRef(range: string): {
   startRow: number;
   endRow: number;
@@ -518,4 +547,66 @@ function numberToColumnLabel(columnNumber: number): string {
   }
 
   return label;
+}
+
+function parseMergedRanges(sheetXml: string): string[] {
+  const mergeCellsMatch = sheetXml.match(/<mergeCells\b[^>]*>([\s\S]*?)<\/mergeCells>/);
+  if (!mergeCellsMatch) {
+    return [];
+  }
+
+  return Array.from(
+    mergeCellsMatch[1].matchAll(/<mergeCell\b[^>]*\bref="([^"]+)"[^>]*\/>/g),
+    (match) => normalizeRangeRef(match[1]),
+  );
+}
+
+function updateMergedRanges(sheetXml: string, ranges: string[]): string {
+  const normalizedRanges = [...new Set(ranges.map(normalizeRangeRef))].sort(compareRangeRefs);
+  const existingMergeCellsMatch = sheetXml.match(/<mergeCells\b[^>]*>[\s\S]*?<\/mergeCells>/);
+
+  if (normalizedRanges.length === 0) {
+    if (!existingMergeCellsMatch || existingMergeCellsMatch.index === undefined) {
+      return sheetXml;
+    }
+
+    return (
+      sheetXml.slice(0, existingMergeCellsMatch.index) +
+      sheetXml.slice(existingMergeCellsMatch.index + existingMergeCellsMatch[0].length)
+    );
+  }
+
+  const mergeCellsXml =
+    `<mergeCells count="${normalizedRanges.length}">` +
+    normalizedRanges.map((range) => `<mergeCell ref="${range}"/>`).join("") +
+    `</mergeCells>`;
+
+  if (existingMergeCellsMatch && existingMergeCellsMatch.index !== undefined) {
+    return (
+      sheetXml.slice(0, existingMergeCellsMatch.index) +
+      mergeCellsXml +
+      sheetXml.slice(existingMergeCellsMatch.index + existingMergeCellsMatch[0].length)
+    );
+  }
+
+  const sheetDataCloseTag = "</sheetData>";
+  const insertionIndex = sheetXml.indexOf(sheetDataCloseTag);
+  if (insertionIndex === -1) {
+    throw new XlsxError("Worksheet is missing </sheetData>");
+  }
+
+  const anchorIndex = insertionIndex + sheetDataCloseTag.length;
+  return sheetXml.slice(0, anchorIndex) + mergeCellsXml + sheetXml.slice(anchorIndex);
+}
+
+function compareRangeRefs(left: string, right: string): number {
+  const leftRange = parseRangeRef(left);
+  const rightRange = parseRangeRef(right);
+
+  return (
+    leftRange.startRow - rightRange.startRow ||
+    leftRange.startColumn - rightRange.startColumn ||
+    leftRange.endRow - rightRange.endRow ||
+    leftRange.endColumn - rightRange.endColumn
+  );
 }

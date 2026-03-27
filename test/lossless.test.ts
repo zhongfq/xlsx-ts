@@ -121,6 +121,39 @@ test("range APIs read and write rectangular values", async () => {
   assert.match(sheetXml, /<row r="3"><c r="B3"><v>3<\/v><\/c><c r="C3"><v>4<\/v><\/c><\/row>/);
 });
 
+test("merged range APIs patch mergeCells without touching unrelated parts", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = await loadFixtureEntries(fixtureDir);
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  assert.deepEqual(sheet.getMergedRanges(), []);
+
+  sheet.addMergedRange("B2:A1");
+  sheet.addMergedRange("C3:D4");
+  sheet.addMergedRange("A1:B2");
+
+  assert.deepEqual(sheet.getMergedRanges(), ["A1:B2", "C3:D4"]);
+
+  let sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.match(
+    sheetXml,
+    /<\/sheetData><mergeCells count="2"><mergeCell ref="A1:B2"\/><mergeCell ref="C3:D4"\/><\/mergeCells>\s*<\/worksheet>/,
+  );
+
+  sheet.removeMergedRange("A1:B2");
+  assert.deepEqual(sheet.getMergedRanges(), ["C3:D4"]);
+
+  sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.match(sheetXml, /<mergeCells count="1"><mergeCell ref="C3:D4"\/><\/mergeCells>/);
+
+  sheet.removeMergedRange("C3:D4");
+  assert.deepEqual(sheet.getMergedRanges(), []);
+
+  sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.doesNotMatch(sheetXml, /<mergeCells\b/);
+});
+
 async function loadFixtureEntries(rootDirectory: string): Promise<Array<{ path: string; data: Uint8Array }>> {
   const entries: Array<{ path: string; data: Uint8Array }> = [];
   const stack = [rootDirectory];

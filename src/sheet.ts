@@ -116,6 +116,24 @@ export class Sheet {
     return formula === undefined ? null : decodeXmlText(formula);
   }
 
+  getRow(rowNumber: number): CellValue[] {
+    assertRowNumber(rowNumber);
+
+    const row = this.getSheetIndex().rows.get(rowNumber);
+    if (!row || row.cells.length === 0) {
+      return [];
+    }
+
+    const values: CellValue[] = [];
+    const maxColumn = Math.max(...row.cells.map((cell) => cell.columnNumber));
+
+    for (let columnNumber = 1; columnNumber <= maxColumn; columnNumber += 1) {
+      values.push(this.getCell(makeCellAddress(rowNumber, columnNumber)));
+    }
+
+    return values;
+  }
+
   getRange(range: string): CellValue[][] {
     const { startRow, endRow, startColumn, endColumn } = parseRangeRef(range);
     const values: CellValue[][] = [];
@@ -195,6 +213,15 @@ export class Sheet {
     const normalizedRange = normalizeRangeRef(range);
     const ranges = this.getMergedRanges().filter((candidate) => candidate !== normalizedRange);
     this.writeSheetXml(updateMergedRanges(this.getSheetIndex().xml, ranges));
+  }
+
+  setRow(rowNumber: number, values: CellValue[], startColumn = 1): void {
+    assertRowNumber(rowNumber);
+    assertColumnNumber(startColumn);
+
+    for (let columnOffset = 0; columnOffset < values.length; columnOffset += 1) {
+      this.setCell(makeCellAddress(rowNumber, startColumn + columnOffset), values[columnOffset]);
+    }
   }
 
   setRange(startAddress: string, values: CellValue[][]): void {
@@ -390,7 +417,7 @@ function buildSheetIndex(sheetXml: string): SheetIndex {
   const sheetDataInnerEnd = sheetDataMatch.index + sheetDataCloseTagStart;
   const rows = new Map<number, LocatedRow>();
   const cells = new Map<string, LocatedCell>();
-  const rowRegex = /<row\b([^>]*\br="(\d+)"[^>]*)\s*(?:>([\s\S]*?)<\/row>|\/>)/g;
+  const rowRegex = /<row\b([^>]*?\br="(\d+)"[^>]*?)\s*(?:>([\s\S]*?)<\/row>|\/>)/g;
 
   for (const match of sheetXml.matchAll(rowRegex)) {
     if (match.index === undefined) {
@@ -418,7 +445,7 @@ function buildSheetIndex(sheetXml: string): SheetIndex {
     };
 
     if (!selfClosing) {
-      const cellRegex = /<c\b([^>]*\br="([A-Z]+)(\d+)"[^>]*)\s*(?:>([\s\S]*?)<\/c>|\/>)/gi;
+      const cellRegex = /<c\b([^>]*?\br="([A-Z]+)(\d+)"[^>]*?)\s*(?:>([\s\S]*?)<\/c>|\/>)/gi;
 
       for (const cellMatch of innerXml.matchAll(cellRegex)) {
         if (cellMatch.index === undefined) {
@@ -441,6 +468,8 @@ function buildSheetIndex(sheetXml: string): SheetIndex {
         row.cells.push(cell);
         cells.set(address, cell);
       }
+
+      row.cells.sort((left, right) => left.columnNumber - right.columnNumber);
     }
 
     rows.set(rowNumber, row);
@@ -536,9 +565,7 @@ function formatRangeRef(
 }
 
 function numberToColumnLabel(columnNumber: number): string {
-  if (columnNumber < 1) {
-    throw new XlsxError(`Invalid column number: ${columnNumber}`);
-  }
+  assertColumnNumber(columnNumber);
 
   let remaining = columnNumber;
   let label = "";
@@ -639,15 +666,15 @@ function updateDimensionRef(sheetIndex: SheetIndex): string {
     );
   }
 
-  const worksheetOpenTagEnd = sheetIndex.xml.indexOf(">");
-  if (worksheetOpenTagEnd === -1) {
+  const worksheetOpenTagMatch = sheetIndex.xml.match(/<worksheet\b[^>]*>/);
+  if (!worksheetOpenTagMatch || worksheetOpenTagMatch.index === undefined) {
     throw new XlsxError("Worksheet is missing opening tag");
   }
 
   return (
-    sheetIndex.xml.slice(0, worksheetOpenTagEnd + 1) +
+    sheetIndex.xml.slice(0, worksheetOpenTagMatch.index + worksheetOpenTagMatch[0].length) +
     dimensionXml +
-    sheetIndex.xml.slice(worksheetOpenTagEnd + 1)
+    sheetIndex.xml.slice(worksheetOpenTagMatch.index + worksheetOpenTagMatch[0].length)
   );
 }
 
@@ -667,4 +694,16 @@ function getUsedRangeFromCells(cells: Iterable<LocatedCell>): string | null {
   }
 
   return hasCells ? formatRangeRef(minRow, minColumn, maxRow, maxColumn) : null;
+}
+
+function assertRowNumber(rowNumber: number): void {
+  if (!Number.isInteger(rowNumber) || rowNumber < 1) {
+    throw new XlsxError(`Invalid row number: ${rowNumber}`);
+  }
+}
+
+function assertColumnNumber(columnNumber: number): void {
+  if (!Number.isInteger(columnNumber) || columnNumber < 1) {
+    throw new XlsxError(`Invalid column number: ${columnNumber}`);
+  }
 }

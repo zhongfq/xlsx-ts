@@ -121,6 +121,25 @@ test("range APIs read and write rectangular values", async () => {
   assert.match(sheetXml, /<row r="3"><c r="B3"><v>3<\/v><\/c><c r="C3"><v>4<\/v><\/c><\/row>/);
 });
 
+test("row APIs read sparse rows and write from a column offset", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = await loadFixtureEntries(fixtureDir);
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  assert.deepEqual(sheet.getRow(1), ["Hello"]);
+  assert.deepEqual(sheet.getRow(4), []);
+
+  sheet.setRow(4, ["Name", null, "Score"], 2);
+
+  assert.deepEqual(sheet.getRow(4), [null, "Name", null, "Score"]);
+  assert.equal(sheet.getUsedRange(), "A1:D4");
+
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.match(sheetXml, /<row r="4"><c r="B4" t="inlineStr"><is><t>Name<\/t><\/is><\/c><c r="C4"\/><c r="D4" t="inlineStr"><is><t>Score<\/t><\/is><\/c><\/row>/);
+  assert.match(sheetXml, /<dimension ref="A1:D4"\/>/);
+});
+
 test("merged range APIs patch mergeCells without touching unrelated parts", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = await loadFixtureEntries(fixtureDir);

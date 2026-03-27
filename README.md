@@ -53,10 +53,12 @@
 - `workbook.getSheets()`
 - `workbook.getSheet(name)`
 - `sheet.getCell(address)`
+- `sheet.getRow(rowNumber)`
 - `sheet.getRange(range)`
 - `sheet.getUsedRange()`
 - `sheet.getMergedRanges()`
 - `sheet.setCell(address, value)`
+- `sheet.setRow(rowNumber, values, startColumn?)`
 - `sheet.setRange(startAddress, values)`
 - `sheet.addMergedRange(range)`
 - `sheet.removeMergedRange(range)`
@@ -71,6 +73,7 @@ const workbook = await Workbook.open("input.xlsx");
 const sheet = workbook.getSheet("Sheet1");
 
 sheet.setCell("A1", "Hello");
+sheet.setRow(5, ["Name", "Score"], 2);
 sheet.setRange("B2", [
   [1, 2],
   [3, 4],

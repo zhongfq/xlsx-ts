@@ -419,6 +419,17 @@ export class Sheet {
     this.writeSheetXml(nextSheetXml);
   }
 
+  deleteRecords(rowNumbers: number[], headerRowNumber = 1): void {
+    assertRowNumber(headerRowNumber);
+
+    const uniqueRows = [...new Set(rowNumbers)];
+    uniqueRows.sort((left, right) => right - left);
+
+    for (const rowNumber of uniqueRows) {
+      this.deleteRecord(rowNumber, headerRowNumber);
+    }
+  }
+
   private getHeaderMap(headerRowNumber: number): Map<string, number> {
     assertRowNumber(headerRowNumber);
 

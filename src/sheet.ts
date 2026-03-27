@@ -402,6 +402,23 @@ export class Sheet {
     }
   }
 
+  deleteRecord(rowNumber: number, headerRowNumber = 1): void {
+    assertRowNumber(rowNumber);
+    assertRowNumber(headerRowNumber);
+
+    if (rowNumber <= headerRowNumber) {
+      throw new XlsxError(`Cannot delete header row: ${rowNumber}`);
+    }
+
+    const row = this.getSheetIndex().rows.get(rowNumber);
+    if (!row) {
+      return;
+    }
+
+    const nextSheetXml = this.getSheetIndex().xml.slice(0, row.start) + this.getSheetIndex().xml.slice(row.end);
+    this.writeSheetXml(nextSheetXml);
+  }
+
   private getHeaderMap(headerRowNumber: number): Map<string, number> {
     assertRowNumber(headerRowNumber);
 

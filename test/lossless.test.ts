@@ -228,6 +228,28 @@ test("record APIs can read and update a specific record row", async () => {
   assert.match(sheetXml, /<row r="2"><c r="A2" t="inlineStr"><is><t>Alicia<\/t><\/is><\/c><c r="B2"><v>99<\/v><\/c><\/row>/);
 });
 
+test("record APIs can delete a record row", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = await loadFixtureEntries(fixtureDir);
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.setRow(1, ["Name", "Score"]);
+  sheet.addRecords([
+    { Name: "Alice", Score: 98 },
+    { Name: "Bob", Score: 87 },
+  ]);
+
+  sheet.deleteRecord(2);
+
+  assert.equal(sheet.getRecord(2), null);
+  assert.deepEqual(sheet.getRecords(), [{ Name: "Bob", Score: 87 }]);
+
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.doesNotMatch(sheetXml, /<row r="2">/);
+  assert.match(sheetXml, /<dimension ref="A1:B3"\/>/);
+});
+
 test("merged range APIs patch mergeCells without touching unrelated parts", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = await loadFixtureEntries(fixtureDir);

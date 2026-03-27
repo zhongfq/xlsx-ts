@@ -134,6 +134,26 @@ export class Sheet {
     return values;
   }
 
+  getColumn(column: number | string): CellValue[] {
+    const columnNumber = normalizeColumnNumber(column);
+    const cells = [...this.getSheetIndex().cells.values()]
+      .filter((cell) => cell.columnNumber === columnNumber)
+      .sort((left, right) => left.rowNumber - right.rowNumber);
+
+    if (cells.length === 0) {
+      return [];
+    }
+
+    const values: CellValue[] = [];
+    const maxRow = cells[cells.length - 1].rowNumber;
+
+    for (let rowNumber = 1; rowNumber <= maxRow; rowNumber += 1) {
+      values.push(this.getCell(makeCellAddress(rowNumber, columnNumber)));
+    }
+
+    return values;
+  }
+
   getRange(range: string): CellValue[][] {
     const { startRow, endRow, startColumn, endColumn } = parseRangeRef(range);
     const values: CellValue[][] = [];
@@ -221,6 +241,15 @@ export class Sheet {
 
     for (let columnOffset = 0; columnOffset < values.length; columnOffset += 1) {
       this.setCell(makeCellAddress(rowNumber, startColumn + columnOffset), values[columnOffset]);
+    }
+  }
+
+  setColumn(column: number | string, values: CellValue[], startRow = 1): void {
+    const columnNumber = normalizeColumnNumber(column);
+    assertRowNumber(startRow);
+
+    for (let rowOffset = 0; rowOffset < values.length; rowOffset += 1) {
+      this.setCell(makeCellAddress(startRow + rowOffset, columnNumber), values[rowOffset]);
     }
   }
 
@@ -507,6 +536,19 @@ function columnLabelToNumber(label: string): number {
   }
 
   return value;
+}
+
+function normalizeColumnNumber(column: number | string): number {
+  if (typeof column === "number") {
+    assertColumnNumber(column);
+    return column;
+  }
+
+  if (!/^[A-Z]+$/i.test(column)) {
+    throw new XlsxError(`Invalid column label: ${column}`);
+  }
+
+  return columnLabelToNumber(column.toUpperCase());
 }
 
 function assertCellAddress(address: string): void {

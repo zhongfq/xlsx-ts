@@ -52,6 +52,7 @@
 - `workbook.listEntries()`
 - `workbook.getSheets()`
 - `workbook.getSheet(name)`
+- `sheet.cell(address)`
 - `sheet.getCell(address)`
 - `sheet.getHeaders(headerRowNumber?)`
 - `sheet.getRecord(rowNumber, headerRowNumber?)`
@@ -85,6 +86,7 @@
 ```ts
 const workbook = await Workbook.open("input.xlsx");
 const sheet = workbook.getSheet("Sheet1");
+const scoreCell = sheet.cell("B2");
 
 sheet.setCell("A1", "Hello");
 sheet.setHeaders(["Name", "Score"]);
@@ -113,6 +115,7 @@ sheet.setRange("B2", [
 ]);
 sheet.addMergedRange("D1:E1");
 sheet.setFormula("B1", "SUM(1,2)", { cachedValue: 3 });
+console.log(scoreCell.value, scoreCell.styleId, scoreCell.formula);
 
 await workbook.save("output.xlsx");
 ```
@@ -120,6 +123,7 @@ await workbook.save("output.xlsx");
 说明：
 
 - 同一张工作表首次读写时会扫描一次 `sheetData`，建立单元格与行的位置索引
+- `sheet.cell(address)` 返回可复用的 `Cell` 句柄，值/公式/样式索引会按工作表 revision 缓存
 - 后续 `getCell` / `getFormula` 会直接走索引查找，不再每次整张表做字符串匹配
 - 每次写入后会重建该表索引，保证后续读取拿到的是最新结果
 - 修改工作表后会同步维护 `<dimension ref="...">`，避免使用范围信息过期

@@ -1,4 +1,5 @@
-import type { CellValue, SetFormulaOptions } from "./types.js";
+import { Cell } from "./cell.js";
+import type { CellType, CellValue, SetFormulaOptions } from "./types.js";
 import { XlsxError } from "./errors.js";
 import type { Workbook } from "./workbook.js";
 import {
@@ -48,6 +49,8 @@ export class Sheet {
   readonly path: string;
   readonly relationshipId: string;
 
+  private readonly cellHandles = new Map<string, Cell>();
+  private revision = 0;
   private readonly workbook: Workbook;
   private sheetIndex?: SheetIndex;
 
@@ -65,55 +68,24 @@ export class Sheet {
     this.relationshipId = options.relationshipId;
   }
 
-  getCell(address: string): CellValue {
-    const cell = this.getSheetIndex().cells.get(normalizeCellAddress(address));
+  cell(address: string): Cell {
+    const normalizedAddress = normalizeCellAddress(address);
+    let cell = this.cellHandles.get(normalizedAddress);
 
     if (!cell) {
-      return null;
+      cell = new Cell(this, normalizedAddress);
+      this.cellHandles.set(normalizedAddress, cell);
     }
 
-    const type = getXmlAttr(cell.attributesSource, "t");
+    return cell;
+  }
 
-    if (type === "inlineStr") {
-      return extractAllTagTexts(cell.innerXml, "t").map(decodeXmlText).join("");
-    }
-
-    if (type === "str") {
-      const rawString = extractTagText(cell.innerXml, "v");
-      return rawString === undefined ? null : decodeXmlText(rawString);
-    }
-
-    if (type === "s") {
-      const indexText = extractTagText(cell.innerXml, "v");
-      if (!indexText) {
-        return null;
-      }
-
-      const value = this.workbook.readSharedStrings()[Number(indexText)];
-      return value ?? null;
-    }
-
-    if (type === "b") {
-      return extractTagText(cell.innerXml, "v") === "1";
-    }
-
-    const rawValue = extractTagText(cell.innerXml, "v");
-    if (rawValue === undefined) {
-      return null;
-    }
-
-    const numericValue = Number(rawValue);
-    return Number.isFinite(numericValue) ? numericValue : decodeXmlText(rawValue);
+  getCell(address: string): CellValue {
+    return this.cell(address).value;
   }
 
   getFormula(address: string): string | null {
-    const cell = this.getSheetIndex().cells.get(normalizeCellAddress(address));
-    if (!cell) {
-      return null;
-    }
-
-    const formula = extractTagText(cell.innerXml, "f");
-    return formula === undefined ? null : decodeXmlText(formula);
+    return this.cell(address).formula;
   }
 
   getHeaders(headerRowNumber = 1): string[] {
@@ -289,6 +261,10 @@ export class Sheet {
     );
   }
 
+  getRevision(): number {
+    return this.revision;
+  }
+
   setHeaders(headers: string[], headerRowNumber = 1, startColumn = 1): void {
     assertRowNumber(headerRowNumber);
     assertColumnNumber(startColumn);
@@ -436,6 +412,18 @@ export class Sheet {
     }
   }
 
+  readCellSnapshot(address: string): {
+    exists: boolean;
+    formula: string | null;
+    rawType: string | null;
+    styleId: number | null;
+    type: CellType;
+    value: CellValue;
+  } {
+    const locatedCell = this.getSheetIndex().cells.get(normalizeCellAddress(address));
+    return parseCellSnapshot(this.workbook, locatedCell);
+  }
+
   private getHeaderMap(headerRowNumber: number): Map<string, number> {
     assertRowNumber(headerRowNumber);
 
@@ -536,7 +524,100 @@ export class Sheet {
 
     this.workbook.writeEntryText(this.path, normalizedSheetXml);
     this.sheetIndex = buildSheetIndex(normalizedSheetXml);
+    this.revision += 1;
   }
+}
+
+function parseCellSnapshot(
+  workbook: Workbook,
+  cell: LocatedCell | undefined,
+): {
+  exists: boolean;
+  formula: string | null;
+  rawType: string | null;
+  styleId: number | null;
+  type: CellType;
+  value: CellValue;
+} {
+  if (!cell) {
+    return {
+      exists: false,
+      formula: null,
+      rawType: null,
+      styleId: null,
+      type: "missing",
+      value: null,
+    };
+  }
+
+  const rawType = getXmlAttr(cell.attributesSource, "t") ?? null;
+  const styleIdText = getXmlAttr(cell.attributesSource, "s");
+  const styleId = styleIdText === undefined ? null : Number(styleIdText);
+  const formulaText = extractTagText(cell.innerXml, "f");
+  const formula = formulaText === undefined ? null : decodeXmlText(formulaText);
+
+  if (formula !== null) {
+    return {
+      exists: true,
+      formula,
+      rawType,
+      styleId: Number.isFinite(styleId) ? styleId : null,
+      type: "formula",
+      value: parseCellValue(workbook, cell, rawType),
+    };
+  }
+
+  const value = parseCellValue(workbook, cell, rawType);
+  const type: CellType =
+    value === null
+      ? "blank"
+      : typeof value === "string"
+        ? "string"
+        : typeof value === "number"
+          ? "number"
+          : "boolean";
+
+  return {
+    exists: true,
+    formula: null,
+    rawType,
+    styleId: Number.isFinite(styleId) ? styleId : null,
+    type,
+    value,
+  };
+}
+
+function parseCellValue(workbook: Workbook, cell: LocatedCell, rawType: string | null): CellValue {
+  if (rawType === "inlineStr") {
+    return extractAllTagTexts(cell.innerXml, "t").map(decodeXmlText).join("");
+  }
+
+  if (rawType === "str") {
+    const rawString = extractTagText(cell.innerXml, "v");
+    return rawString === undefined ? null : decodeXmlText(rawString);
+  }
+
+  if (rawType === "s") {
+    const indexText = extractTagText(cell.innerXml, "v");
+    if (!indexText) {
+      return null;
+    }
+
+    const value = workbook.readSharedStrings()[Number(indexText)];
+    return value ?? null;
+  }
+
+  if (rawType === "b") {
+    return extractTagText(cell.innerXml, "v") === "1";
+  }
+
+  const rawValue = extractTagText(cell.innerXml, "v");
+  if (rawValue === undefined) {
+    return null;
+  }
+
+  const numericValue = Number(rawValue);
+  return Number.isFinite(numericValue) ? numericValue : decodeXmlText(rawValue);
 }
 
 function buildValueCellXml(address: string, value: CellValue, existingAttributesSource?: string): string {

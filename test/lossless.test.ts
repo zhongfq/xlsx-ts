@@ -95,6 +95,38 @@ test("formula cells can be read and updated without dropping styles", async () =
   assert.match(sheetXml, /<v>Hello<\/v>/);
 });
 
+test("cell handle objects cache parsed state and refresh after writes", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = await loadFixtureEntries(fixtureDir);
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+  const first = sheet.cell("A1");
+  const second = sheet.cell("A1");
+
+  assert.equal(first, second);
+  assert.equal(first.exists, true);
+  assert.equal(first.type, "string");
+  assert.equal(first.styleId, 1);
+  assert.equal(first.formula, null);
+  assert.equal(first.value, "Hello");
+
+  first.setValue("World");
+
+  assert.equal(first.value, "World");
+  assert.equal(first.type, "string");
+
+  sheet.setFormula("A1", "SUM(1,2)", { cachedValue: 3 });
+
+  assert.equal(first.formula, "SUM(1,2)");
+  assert.equal(first.type, "formula");
+  assert.equal(first.value, 3);
+
+  const missing = sheet.cell("C9");
+  assert.equal(missing.exists, false);
+  assert.equal(missing.type, "missing");
+  assert.equal(missing.value, null);
+});
+
 test("range APIs read and write rectangular values", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = await loadFixtureEntries(fixtureDir);

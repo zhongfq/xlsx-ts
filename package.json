@@ -18,8 +18,12 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node --test test/**/*.test.mjs",
-    "validate:roundtrip": "npm run build && node scripts/validate-roundtrip.mjs",
+    "test": "node --import tsx --test test/**/*.test.ts",
+    "validate:roundtrip": "node --import tsx scripts/validate-roundtrip.ts",
     "validate:task": "npm run validate:roundtrip -- res/task.xlsx"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
   }
 }

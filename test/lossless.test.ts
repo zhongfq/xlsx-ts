@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { Workbook } from "../dist/src/index.js";
+import { Workbook } from "../src/index.ts";
 
 test("roundtrip keeps extracted parts identical", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
@@ -48,13 +48,16 @@ test("editing a styled cell keeps its style index and leaves styles.xml untouche
   assert.equal(stylesXml, originalStyles);
 });
 
-async function loadFixtureEntries(rootDirectory) {
-  const { readdir, stat } = await import("node:fs/promises");
-  const entries = [];
+async function loadFixtureEntries(rootDirectory: string): Promise<Array<{ path: string; data: Uint8Array }>> {
+  const entries: Array<{ path: string; data: Uint8Array }> = [];
   const stack = [rootDirectory];
 
   while (stack.length > 0) {
     const current = stack.pop();
+    if (!current) {
+      continue;
+    }
+
     const names = await readdir(current);
 
     for (const name of names) {
@@ -78,11 +81,13 @@ async function loadFixtureEntries(rootDirectory) {
   return entries;
 }
 
-function toEntryMap(entries) {
+function toEntryMap(
+  entries: Array<{ path: string; data: Uint8Array }>,
+): Map<string, string> {
   return new Map(entries.map((entry) => [entry.path, Buffer.from(entry.data).toString("utf8")]));
 }
 
-function assertEntryMapsEqual(expected, actual) {
+function assertEntryMapsEqual(expected: Map<string, string>, actual: Map<string, string>): void {
   assert.deepEqual([...actual.keys()].sort(), [...expected.keys()].sort());
 
   for (const [path, text] of expected) {
@@ -90,7 +95,7 @@ function assertEntryMapsEqual(expected, actual) {
   }
 }
 
-function entryText(entries, path) {
+function entryText(entries: Array<{ path: string; data: Uint8Array }>, path: string): string {
   const entry = entries.find((candidate) => candidate.path === path);
   if (!entry) {
     throw new Error(`Missing entry: ${path}`);

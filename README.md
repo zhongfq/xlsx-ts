@@ -80,6 +80,12 @@ npm test
 npm run validate:task
 ```
 
+其中：
+
+- `npm test` 直接通过 `tsx` 运行 TypeScript 测试
+- `npm run validate:task` 直接通过 `tsx` 运行 TypeScript 验证脚本
+- `npm run build` 只负责产出 `dist`
+
 测试里包含两件事：
 
 1. 无修改 roundtrip 后，包内各个 part 的内容逐字节一致

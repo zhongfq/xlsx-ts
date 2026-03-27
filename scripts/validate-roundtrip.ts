@@ -3,12 +3,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 
-import { Workbook } from "../dist/src/index.js";
+import { Workbook } from "../src/index.ts";
 
 const inputArg = process.argv[2];
 
 if (!inputArg) {
-  console.error("Usage: node scripts/validate-roundtrip.mjs <input.xlsx> [output.xlsx]");
+  console.error("Usage: node scripts/validate-roundtrip.ts <input.xlsx> [output.xlsx]");
   process.exit(1);
 }
 
@@ -31,7 +31,7 @@ try {
 
   assert.deepEqual(roundtripKeys, sourceKeys, "zip entry list changed after roundtrip");
 
-  const diffs = [];
+  const diffs: string[] = [];
 
   for (const key of sourceKeys) {
     const left = sourceEntries.get(key);
@@ -76,6 +76,6 @@ try {
   }
 }
 
-function toEntryMap(entries) {
+function toEntryMap(entries: Array<{ path: string; data: Uint8Array }>): Map<string, Buffer> {
   return new Map(entries.map((entry) => [entry.path, Buffer.from(entry.data)]));
 }

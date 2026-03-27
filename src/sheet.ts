@@ -245,8 +245,11 @@ export class Sheet {
   }
 
   private writeSheetXml(nextSheetXml: string): void {
-    this.workbook.writeEntryText(this.path, nextSheetXml);
-    this.sheetIndex = buildSheetIndex(nextSheetXml);
+    const indexedSheet = buildSheetIndex(nextSheetXml);
+    const normalizedSheetXml = updateDimensionRef(indexedSheet);
+
+    this.workbook.writeEntryText(this.path, normalizedSheetXml);
+    this.sheetIndex = buildSheetIndex(normalizedSheetXml);
   }
 }
 
@@ -609,4 +612,59 @@ function compareRangeRefs(left: string, right: string): number {
     leftRange.endRow - rightRange.endRow ||
     leftRange.endColumn - rightRange.endColumn
   );
+}
+
+function updateDimensionRef(sheetIndex: SheetIndex): string {
+  const usedRange = getUsedRangeFromCells(sheetIndex.cells.values());
+  const dimensionMatch = sheetIndex.xml.match(/<dimension\b([^>]*?)\/>/);
+
+  if (!usedRange) {
+    if (!dimensionMatch || dimensionMatch.index === undefined) {
+      return sheetIndex.xml;
+    }
+
+    return (
+      sheetIndex.xml.slice(0, dimensionMatch.index) +
+      sheetIndex.xml.slice(dimensionMatch.index + dimensionMatch[0].length)
+    );
+  }
+
+  const dimensionXml = `<dimension ref="${usedRange}"/>`;
+
+  if (dimensionMatch && dimensionMatch.index !== undefined) {
+    return (
+      sheetIndex.xml.slice(0, dimensionMatch.index) +
+      dimensionXml +
+      sheetIndex.xml.slice(dimensionMatch.index + dimensionMatch[0].length)
+    );
+  }
+
+  const worksheetOpenTagEnd = sheetIndex.xml.indexOf(">");
+  if (worksheetOpenTagEnd === -1) {
+    throw new XlsxError("Worksheet is missing opening tag");
+  }
+
+  return (
+    sheetIndex.xml.slice(0, worksheetOpenTagEnd + 1) +
+    dimensionXml +
+    sheetIndex.xml.slice(worksheetOpenTagEnd + 1)
+  );
+}
+
+function getUsedRangeFromCells(cells: Iterable<LocatedCell>): string | null {
+  let minRow = Number.POSITIVE_INFINITY;
+  let maxRow = 0;
+  let minColumn = Number.POSITIVE_INFINITY;
+  let maxColumn = 0;
+  let hasCells = false;
+
+  for (const cell of cells) {
+    hasCells = true;
+    minRow = Math.min(minRow, cell.rowNumber);
+    maxRow = Math.max(maxRow, cell.rowNumber);
+    minColumn = Math.min(minColumn, cell.columnNumber);
+    maxColumn = Math.max(maxColumn, cell.columnNumber);
+  }
+
+  return hasCells ? formatRangeRef(minRow, minColumn, maxRow, maxColumn) : null;
 }

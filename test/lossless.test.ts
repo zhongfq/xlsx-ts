@@ -154,6 +154,23 @@ test("merged range APIs patch mergeCells without touching unrelated parts", asyn
   assert.doesNotMatch(sheetXml, /<mergeCells\b/);
 });
 
+test("writing cells keeps worksheet dimension ref in sync", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="A1"/><sheetData><row r="1"><c r="A1" s="1" t="inlineStr"><is><t>Hello</t></is></c></row></sheetData></worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.setCell("C4", 9);
+
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.match(sheetXml, /<dimension ref="A1:C4"\/>/);
+});
+
 async function loadFixtureEntries(rootDirectory: string): Promise<Array<{ path: string; data: Uint8Array }>> {
   const entries: Array<{ path: string; data: Uint8Array }> = [];
   const stack = [rootDirectory];

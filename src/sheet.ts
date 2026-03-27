@@ -196,6 +196,29 @@ export class Sheet {
     return records;
   }
 
+  getRecord(rowNumber: number, headerRowNumber = 1): Record<string, CellValue> | null {
+    assertRowNumber(rowNumber);
+
+    const row = this.getRow(rowNumber);
+    if (row.length === 0 || row.every((value) => value === null)) {
+      return null;
+    }
+
+    const headers = this.getRow(headerRowNumber);
+    const record: Record<string, CellValue> = {};
+
+    for (let columnIndex = 0; columnIndex < headers.length; columnIndex += 1) {
+      const header = headers[columnIndex];
+      if (typeof header !== "string" || header.length === 0) {
+        continue;
+      }
+
+      record[header] = row[columnIndex] ?? null;
+    }
+
+    return record;
+  }
+
   getRange(range: string): CellValue[][] {
     const { startRow, endRow, startColumn, endColumn } = parseRangeRef(range);
     const values: CellValue[][] = [];
@@ -351,6 +374,31 @@ export class Sheet {
       }
 
       nextRowNumber += 1;
+    }
+  }
+
+  setRecord(rowNumber: number, record: Record<string, CellValue>, headerRowNumber = 1): void {
+    assertRowNumber(rowNumber);
+
+    const headerMap = this.getHeaderMap(headerRowNumber);
+    const keys = Object.keys(record);
+    if (keys.length === 0) {
+      return;
+    }
+
+    for (const key of keys) {
+      if (!headerMap.has(key)) {
+        throw new XlsxError(`Header not found: ${key}`);
+      }
+    }
+
+    for (const key of keys) {
+      const columnNumber = headerMap.get(key);
+      if (!columnNumber) {
+        continue;
+      }
+
+      this.setCell(makeCellAddress(rowNumber, columnNumber), record[key] ?? null);
     }
   }
 

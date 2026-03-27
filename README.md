@@ -53,6 +53,7 @@
 - `workbook.getSheets()`
 - `workbook.getSheet(name)`
 - `sheet.getCell(address)`
+- `sheet.getRecord(rowNumber, headerRowNumber?)`
 - `sheet.getRecords(headerRowNumber?)`
 - `sheet.getColumn(column)`
 - `sheet.getRow(rowNumber)`
@@ -60,6 +61,7 @@
 - `sheet.getUsedRange()`
 - `sheet.getMergedRanges()`
 - `sheet.setCell(address, value)`
+- `sheet.setRecord(rowNumber, record, headerRowNumber?)`
 - `sheet.addRecord(record, headerRowNumber?)`
 - `sheet.addRecords(records, headerRowNumber?)`
 - `sheet.setColumn(column, values, startRow?)`
@@ -78,6 +80,7 @@ const workbook = await Workbook.open("input.xlsx");
 const sheet = workbook.getSheet("Sheet1");
 
 sheet.setCell("A1", "Hello");
+sheet.setRecord(2, { Name: "Alice", Score: 98 });
 sheet.addRecord({ Name: "Alice", Score: 98 });
 sheet.addRecords([
   { Name: "Bob", Score: 87 },

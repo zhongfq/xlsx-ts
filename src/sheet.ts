@@ -154,6 +154,48 @@ export class Sheet {
     return values;
   }
 
+  getRecords(headerRowNumber = 1): Array<Record<string, CellValue>> {
+    const headers = this.getRow(headerRowNumber);
+    let lastHeaderColumn = 0;
+
+    for (let columnIndex = 0; columnIndex < headers.length; columnIndex += 1) {
+      const value = headers[columnIndex];
+      if (value !== null) {
+        lastHeaderColumn = columnIndex + 1;
+      }
+    }
+
+    if (lastHeaderColumn === 0) {
+      return [];
+    }
+
+    const records: Array<Record<string, CellValue>> = [];
+    const maxRow = this.getSheetIndex().rowNumbers.at(-1) ?? headerRowNumber;
+
+    for (let rowNumber = headerRowNumber + 1; rowNumber <= maxRow; rowNumber += 1) {
+      const row = this.getRow(rowNumber);
+      const hasAnyValue = row.some((value) => value !== null);
+      if (!hasAnyValue) {
+        continue;
+      }
+
+      const record: Record<string, CellValue> = {};
+
+      for (let columnIndex = 0; columnIndex < lastHeaderColumn; columnIndex += 1) {
+        const header = headers[columnIndex];
+        if (typeof header !== "string" || header.length === 0) {
+          continue;
+        }
+
+        record[header] = row[columnIndex] ?? null;
+      }
+
+      records.push(record);
+    }
+
+    return records;
+  }
+
   getRange(range: string): CellValue[][] {
     const { startRow, endRow, startColumn, endColumn } = parseRangeRef(range);
     const values: CellValue[][] = [];
@@ -250,6 +292,39 @@ export class Sheet {
 
     for (let rowOffset = 0; rowOffset < values.length; rowOffset += 1) {
       this.setCell(makeCellAddress(startRow + rowOffset, columnNumber), values[rowOffset]);
+    }
+  }
+
+  addRecord(record: Record<string, CellValue>, headerRowNumber = 1): void {
+    const headers = this.getRow(headerRowNumber);
+    const headerMap = new Map<string, number>();
+
+    headers.forEach((value, index) => {
+      if (typeof value === "string" && value.length > 0 && !headerMap.has(value)) {
+        headerMap.set(value, index + 1);
+      }
+    });
+
+    const keys = Object.keys(record);
+    if (keys.length === 0) {
+      return;
+    }
+
+    for (const key of keys) {
+      if (!headerMap.has(key)) {
+        throw new XlsxError(`Header not found: ${key}`);
+      }
+    }
+
+    const nextRowNumber = Math.max(headerRowNumber + 1, (this.getSheetIndex().rowNumbers.at(-1) ?? headerRowNumber) + 1);
+
+    for (const key of keys) {
+      const columnNumber = headerMap.get(key);
+      if (!columnNumber) {
+        continue;
+      }
+
+      this.setCell(makeCellAddress(nextRowNumber, columnNumber), record[key] ?? null);
     }
   }
 

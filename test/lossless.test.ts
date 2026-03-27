@@ -160,6 +160,33 @@ test("column APIs read sparse columns and write from a row offset", async () => 
   assert.match(sheetXml, /<row r="4"><c r="C4" t="inlineStr"><is><t>Q3<\/t><\/is><\/c><\/row>/);
 });
 
+test("record APIs map rows by header cells", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = await loadFixtureEntries(fixtureDir);
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.setRow(1, ["Name", "Score"]);
+  sheet.setRow(2, ["Alice", 98]);
+  sheet.setRow(4, ["Bob", 87]);
+
+  assert.deepEqual(sheet.getRecords(), [
+    { Name: "Alice", Score: 98 },
+    { Name: "Bob", Score: 87 },
+  ]);
+
+  sheet.addRecord({ Name: "Cara", Score: 91 });
+
+  assert.deepEqual(sheet.getRecords(), [
+    { Name: "Alice", Score: 98 },
+    { Name: "Bob", Score: 87 },
+    { Name: "Cara", Score: 91 },
+  ]);
+
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.match(sheetXml, /<row r="5"><c r="A5" t="inlineStr"><is><t>Cara<\/t><\/is><\/c><c r="B5"><v>91<\/v><\/c><\/row>/);
+});
+
 test("merged range APIs patch mergeCells without touching unrelated parts", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = await loadFixtureEntries(fixtureDir);

@@ -1,0 +1,25 @@
+{
+  "name": "xlsx-ts",
+  "version": "0.1.0",
+  "description": "A lossless-first XLSX reader/writer prototype that preserves styles and untouched package parts.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/**/*.test.mjs",
+    "validate:roundtrip": "npm run build && node scripts/validate-roundtrip.mjs",
+    "validate:task": "npm run validate:roundtrip -- res/task.xlsx"
+  }
+}

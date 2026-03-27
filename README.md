@@ -62,6 +62,7 @@
 - `sheet.getMergedRanges()`
 - `sheet.setCell(address, value)`
 - `sheet.setRecord(rowNumber, record, headerRowNumber?)`
+- `sheet.setRecords(records, headerRowNumber?)`
 - `sheet.deleteRecord(rowNumber, headerRowNumber?)`
 - `sheet.deleteRecords(rowNumbers, headerRowNumber?)`
 - `sheet.addRecord(record, headerRowNumber?)`
@@ -83,6 +84,10 @@ const sheet = workbook.getSheet("Sheet1");
 
 sheet.setCell("A1", "Hello");
 sheet.setRecord(2, { Name: "Alice", Score: 98 });
+sheet.setRecords([
+  { Name: "Alice", Score: 98 },
+  { Name: "Bob", Score: 87 },
+]);
 sheet.deleteRecord(4);
 sheet.deleteRecords([6, 7]);
 sheet.addRecord({ Name: "Alice", Score: 98 });

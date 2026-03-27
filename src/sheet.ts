@@ -320,27 +320,12 @@ export class Sheet {
 
   addRecord(record: Record<string, CellValue>, headerRowNumber = 1): void {
     const headerMap = this.getHeaderMap(headerRowNumber);
-    const keys = Object.keys(record);
-    if (keys.length === 0) {
+    if (Object.keys(record).length === 0) {
       return;
     }
 
-    for (const key of keys) {
-      if (!headerMap.has(key)) {
-        throw new XlsxError(`Header not found: ${key}`);
-      }
-    }
-
     const nextRowNumber = Math.max(headerRowNumber + 1, (this.getSheetIndex().rowNumbers.at(-1) ?? headerRowNumber) + 1);
-
-    for (const key of keys) {
-      const columnNumber = headerMap.get(key);
-      if (!columnNumber) {
-        continue;
-      }
-
-      this.setCell(makeCellAddress(nextRowNumber, columnNumber), record[key] ?? null);
-    }
+    this.writeRecordRow(nextRowNumber, record, headerMap, false);
   }
 
   addRecords(records: Array<Record<string, CellValue>>, headerRowNumber = 1): void {
@@ -352,27 +337,12 @@ export class Sheet {
     let nextRowNumber = Math.max(headerRowNumber + 1, (this.getSheetIndex().rowNumbers.at(-1) ?? headerRowNumber) + 1);
 
     for (const record of records) {
-      const keys = Object.keys(record);
-      if (keys.length === 0) {
+      if (Object.keys(record).length === 0) {
         nextRowNumber += 1;
         continue;
       }
 
-      for (const key of keys) {
-        if (!headerMap.has(key)) {
-          throw new XlsxError(`Header not found: ${key}`);
-        }
-      }
-
-      for (const key of keys) {
-        const columnNumber = headerMap.get(key);
-        if (!columnNumber) {
-          continue;
-        }
-
-        this.setCell(makeCellAddress(nextRowNumber, columnNumber), record[key] ?? null);
-      }
-
+      this.writeRecordRow(nextRowNumber, record, headerMap, false);
       nextRowNumber += 1;
     }
   }
@@ -381,25 +351,28 @@ export class Sheet {
     assertRowNumber(rowNumber);
 
     const headerMap = this.getHeaderMap(headerRowNumber);
-    const keys = Object.keys(record);
-    if (keys.length === 0) {
+    if (Object.keys(record).length === 0) {
       return;
     }
 
-    for (const key of keys) {
-      if (!headerMap.has(key)) {
-        throw new XlsxError(`Header not found: ${key}`);
-      }
+    this.writeRecordRow(rowNumber, record, headerMap, false);
+  }
+
+  setRecords(records: Array<Record<string, CellValue>>, headerRowNumber = 1): void {
+    const headerMap = this.getHeaderMap(headerRowNumber);
+    const existingRecordRows = this.getSheetIndex().rowNumbers.filter(
+      (rowNumber) => rowNumber > headerRowNumber && this.getRecord(rowNumber, headerRowNumber) !== null,
+    );
+    const targetRows: number[] = [];
+
+    for (let index = 0; index < records.length; index += 1) {
+      const rowNumber = headerRowNumber + 1 + index;
+      this.writeRecordRow(rowNumber, records[index], headerMap, true);
+      targetRows.push(rowNumber);
     }
 
-    for (const key of keys) {
-      const columnNumber = headerMap.get(key);
-      if (!columnNumber) {
-        continue;
-      }
-
-      this.setCell(makeCellAddress(rowNumber, columnNumber), record[key] ?? null);
-    }
+    const rowsToDelete = existingRecordRows.filter((rowNumber) => !targetRows.includes(rowNumber));
+    this.deleteRecords(rowsToDelete, headerRowNumber);
   }
 
   deleteRecord(rowNumber: number, headerRowNumber = 1): void {
@@ -443,6 +416,38 @@ export class Sheet {
     });
 
     return headerMap;
+  }
+
+  private writeRecordRow(
+    rowNumber: number,
+    record: Record<string, CellValue>,
+    headerMap: Map<string, number>,
+    replaceMissingKeys: boolean,
+  ): void {
+    const keys = Object.keys(record);
+
+    for (const key of keys) {
+      if (!headerMap.has(key)) {
+        throw new XlsxError(`Header not found: ${key}`);
+      }
+    }
+
+    if (replaceMissingKeys) {
+      for (const [header, columnNumber] of headerMap) {
+        const nextValue = Object.hasOwn(record, header) ? record[header] ?? null : null;
+        this.setCell(makeCellAddress(rowNumber, columnNumber), nextValue);
+      }
+      return;
+    }
+
+    for (const key of keys) {
+      const columnNumber = headerMap.get(key);
+      if (!columnNumber) {
+        continue;
+      }
+
+      this.setCell(makeCellAddress(rowNumber, columnNumber), record[key] ?? null);
+    }
   }
 
   setRange(startAddress: string, values: CellValue[][]): void {

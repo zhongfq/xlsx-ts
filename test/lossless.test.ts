@@ -228,6 +228,35 @@ test("record APIs can read and update a specific record row", async () => {
   assert.match(sheetXml, /<row r="2"><c r="A2" t="inlineStr"><is><t>Alicia<\/t><\/is><\/c><c r="B2"><v>99<\/v><\/c><\/row>/);
 });
 
+test("record APIs can replace the full record set", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = await loadFixtureEntries(fixtureDir);
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.setRow(1, ["Name", "Score"]);
+  sheet.addRecords([
+    { Name: "Alice", Score: 98 },
+    { Name: "Bob", Score: 87 },
+    { Name: "Cara", Score: 91 },
+  ]);
+
+  sheet.setRecords([
+    { Name: "Zoe", Score: 100 },
+    { Name: "Yan" },
+  ]);
+
+  assert.deepEqual(sheet.getRecords(), [
+    { Name: "Zoe", Score: 100 },
+    { Name: "Yan", Score: null },
+  ]);
+
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.match(sheetXml, /<row r="2"><c r="A2" t="inlineStr"><is><t>Zoe<\/t><\/is><\/c><c r="B2"><v>100<\/v><\/c><\/row>/);
+  assert.match(sheetXml, /<row r="3"><c r="A3" t="inlineStr"><is><t>Yan<\/t><\/is><\/c><c r="B3"\/><\/row>/);
+  assert.doesNotMatch(sheetXml, /<row r="4">/);
+});
+
 test("record APIs can delete a record row", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = await loadFixtureEntries(fixtureDir);

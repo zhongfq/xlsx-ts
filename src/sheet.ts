@@ -296,15 +296,7 @@ export class Sheet {
   }
 
   addRecord(record: Record<string, CellValue>, headerRowNumber = 1): void {
-    const headers = this.getRow(headerRowNumber);
-    const headerMap = new Map<string, number>();
-
-    headers.forEach((value, index) => {
-      if (typeof value === "string" && value.length > 0 && !headerMap.has(value)) {
-        headerMap.set(value, index + 1);
-      }
-    });
-
+    const headerMap = this.getHeaderMap(headerRowNumber);
     const keys = Object.keys(record);
     if (keys.length === 0) {
       return;
@@ -326,6 +318,55 @@ export class Sheet {
 
       this.setCell(makeCellAddress(nextRowNumber, columnNumber), record[key] ?? null);
     }
+  }
+
+  addRecords(records: Array<Record<string, CellValue>>, headerRowNumber = 1): void {
+    if (records.length === 0) {
+      return;
+    }
+
+    const headerMap = this.getHeaderMap(headerRowNumber);
+    let nextRowNumber = Math.max(headerRowNumber + 1, (this.getSheetIndex().rowNumbers.at(-1) ?? headerRowNumber) + 1);
+
+    for (const record of records) {
+      const keys = Object.keys(record);
+      if (keys.length === 0) {
+        nextRowNumber += 1;
+        continue;
+      }
+
+      for (const key of keys) {
+        if (!headerMap.has(key)) {
+          throw new XlsxError(`Header not found: ${key}`);
+        }
+      }
+
+      for (const key of keys) {
+        const columnNumber = headerMap.get(key);
+        if (!columnNumber) {
+          continue;
+        }
+
+        this.setCell(makeCellAddress(nextRowNumber, columnNumber), record[key] ?? null);
+      }
+
+      nextRowNumber += 1;
+    }
+  }
+
+  private getHeaderMap(headerRowNumber: number): Map<string, number> {
+    assertRowNumber(headerRowNumber);
+
+    const headers = this.getRow(headerRowNumber);
+    const headerMap = new Map<string, number>();
+
+    headers.forEach((value, index) => {
+      if (typeof value === "string" && value.length > 0 && !headerMap.has(value)) {
+        headerMap.set(value, index + 1);
+      }
+    });
+
+    return headerMap;
   }
 
   setRange(startAddress: string, values: CellValue[][]): void {

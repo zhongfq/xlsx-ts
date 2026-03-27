@@ -61,6 +61,7 @@
 - `sheet.getMergedRanges()`
 - `sheet.setCell(address, value)`
 - `sheet.addRecord(record, headerRowNumber?)`
+- `sheet.addRecords(records, headerRowNumber?)`
 - `sheet.setColumn(column, values, startRow?)`
 - `sheet.setRow(rowNumber, values, startColumn?)`
 - `sheet.setRange(startAddress, values)`
@@ -78,6 +79,10 @@ const sheet = workbook.getSheet("Sheet1");
 
 sheet.setCell("A1", "Hello");
 sheet.addRecord({ Name: "Alice", Score: 98 });
+sheet.addRecords([
+  { Name: "Bob", Score: 87 },
+  { Name: "Cara", Score: 91 },
+]);
 sheet.setColumn("F", ["Q1", "Q2"], 2);
 sheet.setRow(5, ["Name", "Score"], 2);
 sheet.setRange("B2", [

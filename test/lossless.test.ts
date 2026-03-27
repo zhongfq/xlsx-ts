@@ -187,6 +187,28 @@ test("record APIs map rows by header cells", async () => {
   assert.match(sheetXml, /<row r="5"><c r="A5" t="inlineStr"><is><t>Cara<\/t><\/is><\/c><c r="B5"><v>91<\/v><\/c><\/row>/);
 });
 
+test("record APIs can append multiple records in order", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = await loadFixtureEntries(fixtureDir);
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.setRow(1, ["Name", "Score"]);
+  sheet.addRecords([
+    { Name: "Alice", Score: 98 },
+    { Name: "Bob", Score: 87 },
+  ]);
+
+  assert.deepEqual(sheet.getRecords(), [
+    { Name: "Alice", Score: 98 },
+    { Name: "Bob", Score: 87 },
+  ]);
+
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.match(sheetXml, /<row r="2"><c r="A2" t="inlineStr"><is><t>Alice<\/t><\/is><\/c><c r="B2"><v>98<\/v><\/c><\/row>/);
+  assert.match(sheetXml, /<row r="3"><c r="A3" t="inlineStr"><is><t>Bob<\/t><\/is><\/c><c r="B3"><v>87<\/v><\/c><\/row>/);
+});
+
 test("merged range APIs patch mergeCells without touching unrelated parts", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = await loadFixtureEntries(fixtureDir);

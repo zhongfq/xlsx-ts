@@ -116,6 +116,11 @@ export class Sheet {
     return formula === undefined ? null : decodeXmlText(formula);
   }
 
+  getHeaders(headerRowNumber = 1): string[] {
+    assertRowNumber(headerRowNumber);
+    return this.getRow(headerRowNumber).map((value) => (typeof value === "string" ? value : ""));
+  }
+
   getRow(rowNumber: number): CellValue[] {
     assertRowNumber(rowNumber);
 
@@ -284,6 +289,12 @@ export class Sheet {
     );
   }
 
+  setHeaders(headers: string[], headerRowNumber = 1, startColumn = 1): void {
+    assertRowNumber(headerRowNumber);
+    assertColumnNumber(startColumn);
+    this.setRow(headerRowNumber, headers, startColumn);
+  }
+
   addMergedRange(range: string): void {
     const normalizedRange = normalizeRangeRef(range);
     const ranges = this.getMergedRanges();
@@ -307,6 +318,28 @@ export class Sheet {
     for (let columnOffset = 0; columnOffset < values.length; columnOffset += 1) {
       this.setCell(makeCellAddress(rowNumber, startColumn + columnOffset), values[columnOffset]);
     }
+  }
+
+  appendRow(values: CellValue[], startColumn = 1): number {
+    assertColumnNumber(startColumn);
+    const rowNumber = (this.getSheetIndex().rowNumbers.at(-1) ?? 0) + 1;
+    this.setRow(rowNumber, values, startColumn);
+    return rowNumber;
+  }
+
+  appendRows(rows: CellValue[][], startColumn = 1): number[] {
+    assertColumnNumber(startColumn);
+
+    const rowNumbers: number[] = [];
+    let nextRowNumber = (this.getSheetIndex().rowNumbers.at(-1) ?? 0) + 1;
+
+    for (const row of rows) {
+      this.setRow(nextRowNumber, row, startColumn);
+      rowNumbers.push(nextRowNumber);
+      nextRowNumber += 1;
+    }
+
+    return rowNumbers;
   }
 
   setColumn(column: number | string, values: CellValue[], startRow = 1): void {

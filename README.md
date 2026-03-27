@@ -53,6 +53,7 @@
 - `workbook.getSheets()`
 - `workbook.getSheet(name)`
 - `sheet.getCell(address)`
+- `sheet.getHeaders(headerRowNumber?)`
 - `sheet.getRecord(rowNumber, headerRowNumber?)`
 - `sheet.getRecords(headerRowNumber?)`
 - `sheet.getColumn(column)`
@@ -61,12 +62,15 @@
 - `sheet.getUsedRange()`
 - `sheet.getMergedRanges()`
 - `sheet.setCell(address, value)`
+- `sheet.setHeaders(headers, headerRowNumber?, startColumn?)`
 - `sheet.setRecord(rowNumber, record, headerRowNumber?)`
 - `sheet.setRecords(records, headerRowNumber?)`
 - `sheet.deleteRecord(rowNumber, headerRowNumber?)`
 - `sheet.deleteRecords(rowNumbers, headerRowNumber?)`
 - `sheet.addRecord(record, headerRowNumber?)`
 - `sheet.addRecords(records, headerRowNumber?)`
+- `sheet.appendRow(values, startColumn?)`
+- `sheet.appendRows(rows, startColumn?)`
 - `sheet.setColumn(column, values, startRow?)`
 - `sheet.setRow(rowNumber, values, startColumn?)`
 - `sheet.setRange(startAddress, values)`
@@ -83,6 +87,7 @@ const workbook = await Workbook.open("input.xlsx");
 const sheet = workbook.getSheet("Sheet1");
 
 sheet.setCell("A1", "Hello");
+sheet.setHeaders(["Name", "Score"]);
 sheet.setRecord(2, { Name: "Alice", Score: 98 });
 sheet.setRecords([
   { Name: "Alice", Score: 98 },
@@ -94,6 +99,11 @@ sheet.addRecord({ Name: "Alice", Score: 98 });
 sheet.addRecords([
   { Name: "Bob", Score: 87 },
   { Name: "Cara", Score: 91 },
+]);
+sheet.appendRow(["tail", 1]);
+sheet.appendRows([
+  ["tail-2", 2],
+  ["tail-3", 3],
 ]);
 sheet.setColumn("F", ["Q1", "Q2"], 2);
 sheet.setRow(5, ["Name", "Score"], 2);

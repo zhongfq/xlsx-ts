@@ -160,6 +160,44 @@ test("column APIs read sparse columns and write from a row offset", async () => 
   assert.match(sheetXml, /<row r="4"><c r="C4" t="inlineStr"><is><t>Q3<\/t><\/is><\/c><\/row>/);
 });
 
+test("header APIs read and write header rows", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = await loadFixtureEntries(fixtureDir);
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.setHeaders(["Name", "Score"]);
+
+  assert.deepEqual(sheet.getHeaders(), ["Name", "Score"]);
+
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.match(
+    sheetXml,
+    /<row r="1">[\s\S]*<c r="A1" t="inlineStr" s="1"><is><t>Name<\/t><\/is><\/c>[\s\S]*<c r="B1" t="inlineStr"><is><t>Score<\/t><\/is><\/c>[\s\S]*<\/row>/,
+  );
+});
+
+test("append row APIs add rows at the sheet tail", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = await loadFixtureEntries(fixtureDir);
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  const firstRow = sheet.appendRow(["Tail", 1], 2);
+  const nextRows = sheet.appendRows([
+    ["Tail-2", 2],
+    ["Tail-3", 3],
+  ], 2);
+
+  assert.equal(firstRow, 2);
+  assert.deepEqual(nextRows, [3, 4]);
+  assert.deepEqual(sheet.getRow(4), [null, "Tail-3", 3]);
+
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.match(sheetXml, /<row r="2"><c r="B2" t="inlineStr"><is><t>Tail<\/t><\/is><\/c><c r="C2"><v>1<\/v><\/c><\/row>/);
+  assert.match(sheetXml, /<row r="4"><c r="B4" t="inlineStr"><is><t>Tail-3<\/t><\/is><\/c><c r="C4"><v>3<\/v><\/c><\/row>/);
+});
+
 test("record APIs map rows by header cells", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = await loadFixtureEntries(fixtureDir);

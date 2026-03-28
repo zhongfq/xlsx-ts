@@ -1,53 +1,58 @@
 # xlsx-ts
 
-[English README](README.en.md)
+[中文 README](README.zh.md)
 
-一个以“无损优先”为核心的 XLSX 读写库原型。
+A prototype XLSX reader/writer built around a "lossless first" principle.
 
-目标不是先把 Excel 全模型映射成庞大的 JS 对象，而是先保证这一条底线：
+The goal is not to map the entire Excel object model into a huge JS object graph first.
+The first baseline is simpler and stricter:
 
-`read(xlsx) -> write(xlsx)` 之后，解压出来的各个部件文件内容保持一致。
+`read(xlsx) -> write(xlsx)`
 
-这条底线一旦成立，样式、主题、批注、关系文件、未知扩展节点都能被天然保住。后续再往上叠加单元格、公式、批注、图片等 API，风险会低很多。
+After that roundtrip, the extracted package parts should stay byte-for-byte identical unless a part was intentionally edited.
 
-## 设计思路
+Once that baseline holds, styles, themes, comments, relationship files, and unknown extension nodes are preserved naturally.
+Then higher-level APIs can be added on top with much lower risk.
 
-库分成两层：
+## Design
+
+The library is split into two layers:
 
 1. `Lossless package layer`
-   - 把 xlsx 当成 zip 包处理。
-   - 所有 entry 先按原始字节保存。
-   - 未修改的 entry 永远原样写回，不做重新序列化。
+   - Treat an `.xlsx` file as a zip package.
+   - Keep every entry as raw bytes first.
+   - Write untouched entries back exactly as they were, without re-serialization.
 
 2. `Editable workbook layer`
-   - 只针对确实需要改动的 XML 部件做局部 patch。
-   - 当前原型先支持：
-     - 读取工作表列表
-     - 读取单元格
-     - 修改单元格
-     - 读取公式
-     - 修改公式
-   - 样式依赖的 `s="..."` 属性保留不动，因此样式不会因为写值被丢掉。
+   - Apply targeted XML patches only to the parts that actually need to change.
+   - The current prototype supports:
+     - reading sheet lists
+     - reading cells
+     - writing cells
+     - reading formulas
+     - writing formulas
+   - Style-related `s="..."` attributes are preserved, so styles are not lost when values change.
 
-## 为什么这条路线适合“保样式”
+## Why This Works For Style Preservation
 
-大多数样式丢失，根源都不是 `styles.xml` 不会读，而是“写回时整个工作簿被重新生成”，导致：
+Most style loss is not caused by failing to parse `styles.xml`.
+It usually happens because the workbook is regenerated wholesale on write, which tends to break things like:
 
-- 未知节点丢失
-- 属性顺序变化
-- namespace/扩展标记被清洗
-- 关系文件被重排
-- shared strings / worksheet / styles 之间的耦合被误改
+- unknown nodes
+- attribute ordering
+- namespaces and extension markers
+- relationship file ordering
+- coupling between shared strings, worksheets, and styles
 
-无损优先的路线反过来做：
+The lossless-first direction flips that approach:
 
-- 先完整保住 zip 内所有 part
-- 再只改需要改的 part
-- 没改的 part 一律原样回写
+- preserve every package part first
+- edit only the parts that must change
+- write untouched parts back exactly as-is
 
-这样就更容易通过“解压后内容一致”的验收标准。
+That makes it much easier to satisfy a strict "roundtrip without diffs" requirement.
 
-## 当前能力
+## Current API
 
 - `Workbook.open(path)`
 - `Workbook.fromEntries(entries)`
@@ -193,7 +198,7 @@
 - `sheet.setFormula(rowNumber, column, formula, options?)`
 - `workbook.save(path)`
 
-示例：
+Example:
 
 ```ts
 const workbook = await Workbook.open("input.xlsx");
@@ -276,90 +281,90 @@ console.log(scoreCell.value, scoreCell.styleId, scoreCell.formula);
 await workbook.save("output.xlsx");
 ```
 
-说明：
+Notes:
 
-- 同一张工作表首次读写时会扫描一次 `sheetData`，建立单元格与行的位置索引
-- `sheet.cell(address)` 返回可复用的 `Cell` 句柄，值/公式/样式索引会按工作表 revision 缓存；现在也可以通过 `cell.style` / `cell.alignment` / `cell.font` / `cell.fill` / `cell.backgroundColor` / `cell.border` / `cell.numberFormat` 读取当前样式、对齐、字体、填充、背景色、边框和数字格式定义，并用 `cell.setStyle(patch)` / `cell.setAlignment(patch)` / `cell.setFont(patch)` / `cell.setFill(patch)` / `cell.setBackgroundColor(color)` / `cell.setBorder(patch)` / `cell.setNumberFormat(formatCode)` / `cell.cloneStyle(patch?)` 直接派生并应用新样式
-- `sheet.cell()` / `getCell()` / `setCell()` / `getFormula()` / `setFormula()` 现在同时支持 `A1` 地址和 `(rowNumber, column)` 两种调用方式；行列索引是从 `1` 开始
-- 后续 `getCell` / `getFormula` 会直接走索引查找，不再每次整张表做字符串匹配
-- `sheet.rowCount` / `sheet.columnCount` 当前表示已用区域的最大行号 / 最大列号；空表返回 `0`
-- `sheet.getCellEntries()` / `iterCellEntries()` / `getRowEntries()` / `getColumnEntries()` 会按 worksheet 中真实存在的 `<c>` 节点返回带地址、行列号、类型、样式索引和值的对象，适合大表和稀疏表遍历
-- `sheet.deleteCell()` 会真正移除 worksheet 里的 `<c>` 节点；如果你只是想保留样式占位但把值清空，继续用 `setCell(..., null)`
-- `workbook.getStyle()` 会读取 `styles.xml` 里的 `cellXfs` 样式定义；`workbook.updateStyle()` 会原位修改已有 `xf`；`workbook.cloneStyle()` 会基于已有 `xf` 追加一个新样式，并返回新的 `styleId`
-- `workbook.getFont()` / `updateFont()` / `cloneFont()` 会直接操作 `styles.xml` 里的 `<fonts>`；适合你想复用或维护 `fontId` 时使用
-- `workbook.getFill()` / `updateFill()` / `cloneFill()` 会直接操作 `styles.xml` 里的 `<fills>`；适合你想复用或维护 `fillId` 时使用
-- `workbook.getBorder()` / `updateBorder()` / `cloneBorder()` 会直接操作 `styles.xml` 里的 `<borders>`；适合你想复用或维护 `borderId` 时使用
-- `workbook.getNumberFormat()` / `updateNumberFormat()` / `cloneNumberFormat()` 会直接操作 `styles.xml` 里的 `<numFmt>`；自定义格式会从 `164` 开始分配新的 `numFmtId`
-- `sheet.getFont()` 会解析当前单元格最终引用到的字体定义
-- `sheet.setFont()` / `cell.setFont()` 会先 clone 当前 `fontId`，再 clone 当前 `styleId` 并把新 `fontId` 套上去，所以只会影响当前单元格，不会污染其它共用旧字体或旧样式的单元格
-- `sheet.getFill()` 会解析当前单元格最终引用到的填充定义
-- `sheet.setFill()` / `cell.setFill()` 会先 clone 当前 `fillId`，再 clone 当前 `styleId` 并把新 `fillId` 套上去，所以只会影响当前单元格，不会污染其它共用旧填充或旧样式的单元格
-- `sheet.getBackgroundColor()` / `cell.backgroundColor` 是基于填充层的简化读取，只在 `solid` 填充且 `fgColor.rgb` 存在时返回 ARGB 颜色
-- `sheet.setBackgroundColor()` / `cell.setBackgroundColor()` 是基于填充层的简化写法：传颜色时会写成 `solid + fgColor.rgb`，传 `null` 会回退成 `none`
-- `sheet.getBorder()` 会解析当前单元格最终引用到的边框定义
-- `sheet.setBorder()` / `cell.setBorder()` 会先 clone 当前 `borderId`，再 clone 当前 `styleId` 并把新 `borderId` 套上去，所以只会影响当前单元格，不会污染其它共用旧边框或旧样式的单元格
-- `sheet.getNumberFormat()` 会解析当前单元格最终引用到的数字格式定义，内建格式会直接映射成常见 format code
-- `sheet.setNumberFormat()` / `cell.setNumberFormat()` 会先复用或创建目标 `numFmtId`，再 clone 当前 `styleId` 并套上新的数字格式，所以也只影响当前单元格
-- `sheet.getAlignment()` 会解析当前单元格最终引用到的 alignment 定义
-- `sheet.setAlignment()` / `cell.setAlignment()` 会基于当前 `styleId` clone 出一个新样式，并只更新 alignment / `applyAlignment`，所以同样只影响当前单元格；传 `null` 可以移除 alignment 节点
-- `sheet.getStyle()` 会按单元格当前的 `styleId` 读取样式定义；如果单元格本身没有 `s="..."`，会回退到默认样式 `0`
-- `sheet.setStyle()` 会基于当前单元格样式克隆出一个新的 `styleId`，写回 `styles.xml`，并把新样式应用到该单元格；这样不会连带修改其它共用旧 `styleId` 的单元格
-- `sheet.cloneStyle()` 会基于当前单元格样式克隆出一个新的 `styleId`，写回 `styles.xml`，并把新样式直接应用到该单元格；同样支持 `A1` 和 `(rowNumber, column)`
-- `sheet.getStyleId()` / `setStyleId()` 仍然只负责读写单元格上的 `s="..."` 样式索引
-- `sheet.getRowStyleId()` / `setRowStyleId()` 当前读写 `<row s="..." customFormat="1">` 这一层的行级样式索引；这一层本身不会修改 `styles.xml`
-- `sheet.getRowStyle()` / `sheet.getColumnStyle()` 会把行/列当前引用的样式索引解析成样式定义；如果该行/列没有显式样式，返回 `null`
-- `sheet.setRowStyle()` / `sheet.setColumnStyle()` 是行列级的便捷入口，会复用现有 clone 语义：基于当前行/列样式克隆一个新 `styleId`，再立刻应用回去
-- `sheet.cloneRowStyle()` / `sheet.cloneColumnStyle()` 会基于当前行/列样式克隆出一个新的 `styleId` 并立即应用；如果当前没有显式样式，会从默认样式 `0` 克隆
-- `sheet.getColumnStyleId()` / `setColumnStyleId()` 当前读写 `<cols><col ... style="..."/>` 这一层的列级样式索引；插删列时这些范围也会一起跟着移动
-- `sheet.copyStyle()` 当前会把源单元格的 `styleId` 复制到目标单元格，不会改动目标单元格的值或公式；同样支持地址和 `(rowNumber, column)` 两种调用
-- `sheet.getFreezePane()` / `freezePane()` / `unfreezePane()` 当前维护 worksheet `sheetViews/sheetView/pane`；插删行列时 `topLeftCell` 也会继续跟随更新
-- `sheet.getSelection()` / `setSelection()` 当前读写 worksheet `sheetViews/sheetView/selection`；冻结窗格存在时会优先落在当前 active pane 对应的 selection 上
-- 每次写入后会重建该表索引，保证后续读取拿到的是最新结果
-- 修改工作表后会同步维护 `<dimension ref="...">`，避免使用范围信息过期
-- `deleteRow()` / `deleteColumn()` 当前会同步更新本 sheet 的单元格坐标、公式引用、合并区域、`dimension`、常见 `ref/sqref` 属性、`definedNames`，以及其它 sheet 里显式引用它的公式
-- `insertRow()` 当前会同步更新本 sheet 的单元格坐标、公式引用、合并区域、`dimension`、常见 `ref/sqref` 属性、`definedNames`，以及其它 sheet 里显式引用它的公式
-- `insertColumn()` 当前会同步更新本 sheet 的单元格坐标、公式引用、合并区域、`dimension`、常见 `ref/sqref` 属性、`definedNames`，以及其它 sheet 里显式引用它的公式
-- `sheet.getTables()` 当前可以读取已有 table 的名称、显示名、范围和部件路径
-- `sheet.getHyperlinks()` 当前可以读取当前 sheet 上的内部和外部超链接；外部链接会解析 sheet rel 里的目标地址
-- `sheet.getAutoFilter()` / `sheet.setAutoFilter()` / `sheet.removeAutoFilter()` 当前支持读写 worksheet 顶层 `autoFilter`，移除时会一并清掉顶层 `sortState`
-- `sheet.getDataValidations()` / `sheet.setDataValidation()` / `sheet.removeDataValidation()` 当前支持读写 worksheet 顶层 `dataValidations`，包括常见属性与 `formula1/formula2`，并继续跟随插删行列维护 `sqref`
-- `sheet.addTable()` 当前会创建最基础的 table part、sheet rel、`[Content_Types].xml` override 和 table XML；列名默认取范围首行，空列名会回退到 `ColumnN`
-- `sheet.removeTable()` 当前会同步移除当前 sheet 的 `tableParts`、sheet rel、table XML 和对应的 content type override
-- `sheet.setHyperlink()` / `sheet.removeHyperlink()` 当前支持维护 worksheet `<hyperlinks>` 与外部链接对应的 sheet rel，内部链接 target 用 `#Sheet1!A1` 这种格式
-- 已有关联 table 在插删行列时会同步维护它们自己的 `ref` / `autoFilter`；如果整块 table 被删空，会从当前 sheet 的 `tableParts` 里移除
-- `workbook.getDefinedNames()` / `getDefinedName()` / `setDefinedName()` / `deleteDefinedName()` 当前支持读写全局和本地 `definedNames`
-- `workbook.getSheetVisibility()` / `setSheetVisibility()` 当前支持 `visible` / `hidden` / `veryHidden`；并会阻止把最后一张可见 sheet 隐藏掉
-- `workbook.getActiveSheet()` / `setActiveSheet()` 当前读写 `workbookView.activeTab`；如果 workbook 里还没有 `bookViews`，会自动补上；隐藏 sheet 不允许设为 active
-- `workbook.renameSheet()` / `sheet.rename()` 当前会同步维护 sheet 名、其它 sheet 的显式公式引用、`definedNames`、内部超链接位置和文档属性
-- `workbook.moveSheet()` 当前使用 0-based `targetIndex`，会同步维护 workbook 里的 `<sheets>` 顺序、`docProps/app.xml` 里的工作表顺序、本地 `definedNames` 的 `localSheetId`，以及 `workbookView.activeTab`
-- `workbook.addSheet()` / `workbook.deleteSheet()` 当前会同步维护 `workbook.xml`、rels、`[Content_Types].xml`，并在删除 sheet 时修正剩余公式与 `definedNames`
+- On first read/write access, a sheet scans `sheetData` once and builds indexes for rows and cells.
+- `sheet.cell(address)` returns a reusable `Cell` handle whose parsed value/formula/style-index state is cached by sheet revision. It now also exposes `cell.style`, `cell.alignment`, `cell.font`, `cell.fill`, `cell.backgroundColor`, `cell.border`, `cell.numberFormat`, `cell.setStyle(patch)`, `cell.setAlignment(patch)`, `cell.setFont(patch)`, `cell.setFill(patch)`, `cell.setBackgroundColor(color)`, `cell.setBorder(patch)`, `cell.setNumberFormat(formatCode)`, and `cell.cloneStyle(patch?)`.
+- `sheet.cell()`, `getCell()`, `setCell()`, `getFormula()`, and `setFormula()` now support both `A1` addresses and `(rowNumber, column)` calls. Row and column indexes are 1-based.
+- Later `getCell()` and `getFormula()` calls use those indexes directly instead of running a full string match on every read.
+- `sheet.rowCount` and `sheet.columnCount` currently mean the maximum used row number and maximum used column number. Empty sheets return `0`.
+- `sheet.getCellEntries()`, `iterCellEntries()`, `getRowEntries()`, and `getColumnEntries()` expose the real worksheet `<c>` nodes with address, row/column indexes, type, style id, and value, which is useful for large or sparse sheet iteration.
+- `sheet.deleteCell()` removes the worksheet `<c>` node entirely; if you want to keep a styled placeholder but clear the value, continue using `setCell(..., null)`.
+- `workbook.getStyle()` reads `cellXfs` definitions from `styles.xml`, `workbook.updateStyle()` patches an existing `<xf>` in place, and `workbook.cloneStyle()` appends a new `<xf>` derived from an existing one and returns the new style id.
+- `workbook.getFont()`, `updateFont()`, and `cloneFont()` work directly on the `<fonts>` section in `styles.xml`, which is useful when you want to manage reusable `fontId` values explicitly.
+- `workbook.getFill()`, `updateFill()`, and `cloneFill()` work directly on the `<fills>` section in `styles.xml`, which is useful when you want to manage reusable `fillId` values explicitly.
+- `workbook.getBorder()`, `updateBorder()`, and `cloneBorder()` work directly on the `<borders>` section in `styles.xml`, which is useful when you want to manage reusable `borderId` values explicitly.
+- `workbook.getNumberFormat()`, `updateNumberFormat()`, and `cloneNumberFormat()` work directly on `<numFmt>` entries in `styles.xml`; new custom formats are allocated from `numFmtId` `164` upward.
+- `sheet.getFont()` resolves the font definition currently used by the cell.
+- `sheet.setFont()` and `cell.setFont()` clone the current `fontId`, then clone the current `styleId` with that new font attached, so only the targeted cell changes and other cells sharing the old font/style stay untouched.
+- `sheet.getFill()` resolves the fill definition currently used by the cell.
+- `sheet.setFill()` and `cell.setFill()` clone the current `fillId`, then clone the current `styleId` with that new fill attached, so only the targeted cell changes and other cells sharing the old fill/style stay untouched.
+- `sheet.getBackgroundColor()` and `cell.backgroundColor` are fill-based convenience readers. They return an ARGB value only when the cell uses a `solid` fill with `fgColor.rgb`.
+- `sheet.setBackgroundColor()` and `cell.setBackgroundColor()` are fill-based convenience writers: passing a color writes `solid + fgColor.rgb`, and passing `null` resets the fill to `none`.
+- `sheet.getBorder()` resolves the border definition currently used by the cell.
+- `sheet.setBorder()` and `cell.setBorder()` clone the current `borderId`, then clone the current `styleId` with that new border attached, so only the targeted cell changes and other cells sharing the old border/style stay untouched.
+- `sheet.getNumberFormat()` resolves the number-format definition currently used by the cell, including common builtin format codes.
+- `sheet.setNumberFormat()` and `cell.setNumberFormat()` reuse or create the target `numFmtId`, then clone the current `styleId` with that new number format attached, so only the targeted cell changes.
+- `sheet.getAlignment()` resolves the alignment definition currently used by the cell.
+- `sheet.setAlignment()` and `cell.setAlignment()` clone the current `styleId`, patch only the alignment / `applyAlignment` layer, and apply the new style back to the target cell; passing `null` removes the `<alignment>` node.
+- `sheet.getStyle()` resolves the cell's current style definition; when the cell has no explicit `s="..."`, it falls back to the default style `0`.
+- `sheet.setStyle()` clones the current cell style into a new `styleId`, writes that new definition into `styles.xml`, and applies it back to the same cell so other cells sharing the old style id stay untouched.
+- `sheet.cloneStyle()` clones the current cell style, writes the new definition into `styles.xml`, applies it back to the same cell, and supports both `A1` and `(rowNumber, column)` calls.
+- `sheet.getStyleId()` and `setStyleId()` still only read and write the cell-level `s="..."` style index itself.
+- `sheet.getRowStyleId()` and `setRowStyleId()` currently read and write the row-level `<row s="..." customFormat="1">` style index; that layer still does not modify `styles.xml`.
+- `sheet.getRowStyle()` and `sheet.getColumnStyle()` resolve the currently assigned row/column style definition; they return `null` when no explicit row/column style is present.
+- `sheet.setRowStyle()` and `sheet.setColumnStyle()` are convenience entry points for row/column style edits. They reuse the same clone semantics: derive a new `styleId` from the current row/column style and apply it immediately.
+- `sheet.cloneRowStyle()` and `sheet.cloneColumnStyle()` clone the current row/column style into a new `styleId` and apply it immediately; when no explicit row/column style exists yet, they clone from the default style `0`.
+- `sheet.getColumnStyleId()` and `setColumnStyleId()` currently read and write the column-level `<cols><col ... style="..."/>` style index, and those ranges are shifted during column insert/delete operations.
+- `sheet.copyStyle()` currently copies the source cell's `styleId` onto the target cell without changing the target cell's value or formula; both address and `(rowNumber, column)` calls are supported.
+- `sheet.getFreezePane()`, `freezePane()`, and `unfreezePane()` currently manage worksheet `sheetViews/sheetView/pane`; `topLeftCell` keeps tracking row and column insert/delete operations.
+- `sheet.getSelection()` and `setSelection()` currently read and write worksheet `sheetViews/sheetView/selection`; when a frozen pane exists, they target the selection for the current active pane.
+- After each write, the sheet index is rebuilt so later reads always see the latest content.
+- Worksheet edits keep `<dimension ref="...">` in sync so used-range metadata does not go stale.
+- `deleteRow()` and `deleteColumn()` currently update cell coordinates, formulas, merged ranges, worksheet `dimension`, common `ref` and `sqref` attributes, `definedNames`, and explicit formulas in other sheets that reference the edited sheet.
+- `insertRow()` currently updates cell coordinates, formulas, merged ranges, worksheet `dimension`, common `ref` and `sqref` attributes, `definedNames`, and explicit formulas in other sheets that reference the edited sheet.
+- `insertColumn()` currently updates cell coordinates, formulas, merged ranges, worksheet `dimension`, common `ref` and `sqref` attributes, `definedNames`, and explicit formulas in other sheets that reference the edited sheet.
+- `sheet.getTables()` currently reads existing table names, display names, ranges, and part paths.
+- `sheet.getHyperlinks()` currently reads internal and external hyperlinks from the sheet; external link targets are resolved through the sheet relationships part.
+- `sheet.getAutoFilter()`, `sheet.setAutoFilter()`, and `sheet.removeAutoFilter()` currently manage the worksheet-level `autoFilter`; removing it also clears the top-level `sortState`.
+- `sheet.getDataValidations()`, `sheet.setDataValidation()`, and `sheet.removeDataValidation()` currently manage worksheet-level `dataValidations`, including common attributes plus `formula1` and `formula2`, and keep `sqref` updated during row and column edits.
+- `sheet.addTable()` currently creates the basic table part, sheet relationship, `[Content_Types].xml` override, and table XML. Column names default to the first row in the range, and blank names fall back to `ColumnN`.
+- `sheet.removeTable()` currently removes the current sheet's `tableParts`, sheet relationship, table XML, and matching content type override.
+- Existing linked tables keep their own `ref` and `autoFilter` updated during row and column insert/delete operations. If a table becomes empty, its `tableParts` entry is removed from the sheet.
+- `sheet.setHyperlink()` and `sheet.removeHyperlink()` currently manage worksheet `<hyperlinks>` plus the matching sheet relationship for external links. Internal targets use a format like `#Sheet1!A1`.
+- `workbook.getDefinedNames()`, `getDefinedName()`, `setDefinedName()`, and `deleteDefinedName()` currently support both global and local defined names.
+- `workbook.getSheetVisibility()` and `setSheetVisibility()` currently support `visible`, `hidden`, and `veryHidden`, and prevent hiding the last visible sheet in the workbook.
+- `workbook.getActiveSheet()` and `setActiveSheet()` currently read and write `workbookView.activeTab`; if the workbook does not yet contain `bookViews`, they are created automatically, and hidden sheets cannot be activated.
+- `workbook.renameSheet()` and `sheet.rename()` currently update sheet names, explicit formula references in other sheets, `definedNames`, internal hyperlink locations, and document properties.
+- `workbook.moveSheet()` currently uses a 0-based `targetIndex` and keeps workbook `<sheets>` order, worksheet order in `docProps/app.xml`, local defined-name `localSheetId` values, and `workbookView.activeTab` aligned.
+- `workbook.addSheet()` and `workbook.deleteSheet()` currently maintain `workbook.xml`, workbook rels, and `[Content_Types].xml`, and adjust remaining formulas and `definedNames` when a sheet is deleted.
 
-## 基准测试
+## Benchmarking
 
-仓库内现在包含一份已脱敏的大型基准文件 [res/monster.xlsx](/Users/codetypes/Desktop/Github/xlsx-ts/res/monster.xlsx)，可直接用于性能回归对比。
+The repo now includes a sanitized large benchmark workbook at [res/monster.xlsx](/Users/codetypes/Desktop/Github/xlsx-ts/res/monster.xlsx), intended for repeatable performance regression checks.
 
-常用命令：
+Common commands:
 
 - `npm run bench:monster`
-  - 对 `res/monster.xlsx` 运行 3 轮对比基准，比较 `xlsx-ts` 和 `xlsx dense`
+  - Run a 3-iteration comparison on `res/monster.xlsx` against `xlsx-ts` and `xlsx dense`
 - `npm run bench:check`
-  - 对 `res/monster.xlsx` 运行 5 轮对比，并校验 `benchmarks/monster-baseline.json` 里的正确性与性能阈值
+  - Run a 5-iteration comparison on `res/monster.xlsx` and validate correctness plus performance thresholds from `benchmarks/monster-baseline.json`
 - `npm run bench:compare`
-  - 等价于运行仓库里的对比脚本
+  - Equivalent wrapper around the compare script kept in the repo
 - `node --import tsx scripts/benchmark.ts res/monster.xlsx 5`
-  - 自定义文件路径和迭代次数
+  - Run the benchmark with a custom file path and iteration count
 - `node --import tsx scripts/benchmark.ts res/monster.xlsx 5 --check benchmarks/monster-baseline.json`
-  - 对任意基准文件执行回归检查；超出阈值时进程会以非零状态退出
+  - Run the regression check against any benchmark file; the process exits non-zero when the thresholds are exceeded
 
- ## 当前限制
+## Current Limits
 
-- zip 读写后端现在使用纯 JS 的 `fflate`，不再依赖系统里的 `python3` 与 `zip`
-- 当前仍会把整个 zip 包与各个 entry 一起放进内存，对超大文件的峰值内存还可以继续优化
-- 字符串写入使用 `inlineStr`，避免为了简单写值而重建 `sharedStrings.xml`
-- 合并单元格、批注、富文本、图片等 API 还没加
-- 对 XML 的写入是“局部 patch”，不是完整 OOXML 模型
+- The zip backend now uses pure JS via `fflate`, so it no longer depends on system `python3` or `zip`.
+- The full zip package and all entries are still loaded into memory today, so peak memory usage for very large files can still be improved.
+- String writes use `inlineStr` to avoid rebuilding `sharedStrings.xml` for simple value updates.
+- APIs for merged comments, rich text, images, and similar parts are still missing.
+- XML writes are implemented as local patches, not as a full OOXML object model.
 
-## 开发
+## Development
 
 ```bash
 npm run build
@@ -367,26 +372,26 @@ npm test
 npm run validate:task
 ```
 
-其中：
+Where:
 
-- `npm test` 直接通过 `tsx` 运行 TypeScript 测试
-- `npm run validate:task` 直接通过 `tsx` 运行 TypeScript 验证脚本
-- `npm run build` 只负责产出 `dist`
+- `npm test` runs the TypeScript tests through `tsx`
+- `npm run validate:task` runs the TypeScript validation script through `tsx`
+- `npm run build` only produces `dist`
 
-测试里包含两件事：
+The test suite currently checks two things:
 
-1. 无修改 roundtrip 后，包内各个 part 的内容逐字节一致
-2. 修改一个带样式的单元格后，样式索引仍被保留，`styles.xml` 不变
+1. After an untouched roundtrip, every package part remains byte-for-byte identical.
+2. After editing a styled cell, the style index is still preserved and `styles.xml` stays unchanged.
 
-## 真实文件验证
+## Real File Validation
 
-仓库里的 [`res/task.xlsx`](/Users/codetypes/Desktop/Github/xlsx-ts/res/task.xlsx) 可以作为后续回归验证样本。
+[`res/task.xlsx`](/Users/codetypes/Desktop/Github/xlsx-ts/res/task.xlsx) in the repository is a useful regression sample.
 
 ```bash
 npm run validate:task
 ```
 
-如果想验证任意文件：
+To validate any other file:
 
 ```bash
 npm run validate:roundtrip -- path/to/file.xlsx

@@ -1,8 +1,18 @@
 {
-  "name": "xlsx-ts",
+  "name": "@codetypess/xlsx-ts",
   "version": "0.1.0",
   "description": "A lossless-first XLSX reader/writer prototype that preserves styles and untouched package parts.",
   "type": "module",
+  "license": "MIT",
+  "author": "codetypes",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/codetypess/xlsx-ts.git"
+  },
+  "homepage": "https://github.com/codetypess/xlsx-ts#readme",
+  "bugs": {
+    "url": "https://github.com/codetypess/xlsx-ts/issues"
+  },
   "exports": {
     ".": {
       "types": "./dist/src/index.d.ts",
@@ -19,6 +29,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "node --import tsx --test test/**/*.test.ts",
+    "prepublishOnly": "npm run build && npm test",
+    "release": "npm publish --access public",
     "bench:monster": "node --import tsx scripts/benchmark.ts res/monster.xlsx",
     "bench:check": "node --import tsx scripts/benchmark.ts res/monster.xlsx 5 --check benchmarks/monster-baseline.json",
     "bench:compare": "node --import tsx test/compare-test.ts",

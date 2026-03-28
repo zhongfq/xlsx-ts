@@ -930,6 +930,75 @@ test("workbook can delete a sheet and rewrite remaining references", async () =>
   assert.doesNotMatch(appXml, /Sheet2/);
 });
 
+test("sheet rename updates workbook metadata, formulas, and hyperlink locations", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    replaceEntryText(
+      replaceEntryText(
+        withSecondSheet(
+          await loadFixtureEntries(fixtureDir),
+          `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1"><f>Sheet1!A1</f><v>1</v></c>
+    </row>
+  </sheetData>
+  <hyperlinks><hyperlink ref="A1" location="#Sheet1!A1"/></hyperlinks>
+</worksheet>`,
+        ),
+        "xl/workbook.xml",
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+    <sheet name="Sheet2" sheetId="2" r:id="rId3"/>
+  </sheets>
+  <definedNames>
+    <definedName name="ExternalRef">Sheet1!$A$1</definedName>
+  </definedNames>
+</workbook>`,
+      ),
+      "docProps/app.xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
+  <Application>xlsx-ts</Application>
+  <HeadingPairs><vt:vector size="2" baseType="variant"><vt:variant><vt:lpstr>Worksheets</vt:lpstr></vt:variant><vt:variant><vt:i4>2</vt:i4></vt:variant></vt:vector></HeadingPairs>
+  <TitlesOfParts><vt:vector size="2" baseType="lpstr"><vt:lpstr>Sheet1</vt:lpstr><vt:lpstr>Sheet2</vt:lpstr></vt:vector></TitlesOfParts>
+</Properties>`,
+    ),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1"><f>Sheet1!A1</f><v>1</v></c>
+    </row>
+  </sheetData>
+</worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.rename("Data Set");
+
+  assert.equal(sheet.name, "Data Set");
+  assert.deepEqual(workbook.getSheets().map((candidate) => candidate.name), ["Data Set", "Sheet2"]);
+  assert.equal(workbook.getSheet("Sheet2").getFormula("A1"), "'Data Set'!A1");
+
+  const workbookXml = entryText(workbook.toEntries(), "xl/workbook.xml");
+  const appXml = entryText(workbook.toEntries(), "docProps/app.xml");
+  const sheet1Xml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  const sheet2Xml = entryText(workbook.toEntries(), "xl/worksheets/sheet2.xml");
+
+  assert.match(workbookXml, /<sheet name="Data Set" sheetId="1" r:id="rId1"\/>/);
+  assert.match(workbookXml, /<definedName name="ExternalRef">'Data Set'!\$A\$1<\/definedName>/);
+  assert.match(sheet1Xml, /<c r="A1"><f>'Data Set'!A1<\/f><v>1<\/v><\/c>/);
+  assert.match(sheet2Xml, /<c r="A1"><f>'Data Set'!A1<\/f><v>1<\/v><\/c>/);
+  assert.match(sheet2Xml, /<hyperlinks><hyperlink ref="A1" location="#'Data Set'!A1"\/><\/hyperlinks>/);
+  assert.match(appXml, /<vt:lpstr>Data Set<\/vt:lpstr><vt:lpstr>Sheet2<\/vt:lpstr>/);
+});
+
 async function loadFixtureEntries(rootDirectory: string): Promise<Array<{ path: string; data: Uint8Array }>> {
   const entries: Array<{ path: string; data: Uint8Array }> = [];
   const stack = [rootDirectory];

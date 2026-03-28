@@ -4,6 +4,7 @@ import {
   Sheet,
   deleteFormulaReferences,
   deleteSheetFormulaReferences,
+  renameSheetFormulaReferences,
   shiftFormulaReferences,
 } from "./sheet.js";
 import { CliZipAdapter } from "./zip-cli.js";
@@ -77,6 +78,42 @@ export class Workbook {
     }
 
     return sheet;
+  }
+
+  renameSheet(currentSheetName: string, nextSheetName: string): Sheet {
+    assertSheetName(nextSheetName);
+
+    const context = this.getWorkbookContext();
+    const renamedSheet = context.sheets.find((sheet) => sheet.name === currentSheetName);
+    if (!renamedSheet) {
+      throw new XlsxError(`Sheet not found: ${currentSheetName}`);
+    }
+
+    if (currentSheetName === nextSheetName) {
+      return renamedSheet;
+    }
+
+    if (context.sheets.some((sheet) => sheet.name === nextSheetName)) {
+      throw new XlsxError(`Sheet already exists: ${nextSheetName}`);
+    }
+
+    for (const sheet of context.sheets) {
+      this.rewriteSheetFormulaTexts(sheet.path, (formula) =>
+        renameSheetFormulaReferences(formula, currentSheetName, nextSheetName),
+      );
+      this.rewriteSheetHyperlinkLocations(sheet.path, currentSheetName, nextSheetName);
+    }
+
+    const workbookXml = this.readEntryText(context.workbookPath);
+    this.writeEntryText(
+      context.workbookPath,
+      renameSheetInWorkbookXml(workbookXml, renamedSheet.relationshipId, currentSheetName, nextSheetName),
+    );
+    this.rewriteAppSheetNames(
+      context.sheets.map((sheet) => (sheet.name === currentSheetName ? nextSheetName : sheet.name)),
+    );
+    renamedSheet.name = nextSheetName;
+    return renamedSheet;
   }
 
   addSheet(sheetName: string): Sheet {
@@ -318,6 +355,39 @@ export class Workbook {
     }
   }
 
+  private rewriteSheetHyperlinkLocations(
+    path: string,
+    currentSheetName: string,
+    nextSheetName: string,
+  ): void {
+    const sheetXml = this.readEntryText(path);
+    let changed = false;
+    const nextSheetXml = sheetXml.replace(/<hyperlink\b([^>]*?)\/>/g, (match, attributesSource) => {
+      const attributes = parseAttributes(attributesSource);
+      const locationIndex = attributes.findIndex(([name]) => name === "location");
+
+      if (locationIndex === -1) {
+        return match;
+      }
+
+      const location = attributes[locationIndex]?.[1] ?? "";
+      const nextLocation = renameHyperlinkLocation(location, currentSheetName, nextSheetName);
+      if (nextLocation === location) {
+        return match;
+      }
+
+      changed = true;
+      const nextAttributes = [...attributes];
+      nextAttributes[locationIndex] = ["location", nextLocation];
+      const serializedAttributes = serializeAttributes(nextAttributes);
+      return `<hyperlink${serializedAttributes ? ` ${serializedAttributes}` : ""}/>`;
+    });
+
+    if (changed) {
+      this.writeEntryText(path, nextSheetXml);
+    }
+  }
+
   private rewriteAppSheetNames(sheetNames: string[]): void {
     const appPath = "docProps/app.xml";
     if (!this.entries.has(appPath)) {
@@ -443,6 +513,44 @@ function insertBeforeClosingTag(xml: string, tagName: string, snippet: string): 
   return xml.slice(0, insertionIndex) + snippet + xml.slice(insertionIndex);
 }
 
+function renameSheetInWorkbookXml(
+  workbookXml: string,
+  relationshipId: string,
+  currentSheetName: string,
+  nextSheetName: string,
+): string {
+  return workbookXml.replace(
+    /<sheet\b([^>]*?)\/>/g,
+    (match, attributesSource) => {
+      const attributes = parseAttributes(attributesSource);
+      const relationshipIndex = attributes.findIndex(([name]) => name === "r:id");
+
+      if (relationshipIndex === -1 || attributes[relationshipIndex]?.[1] !== relationshipId) {
+        return match;
+      }
+
+      const nextAttributes = attributes.map(([name, value]) => {
+        if (name === "name") {
+          return [name, nextSheetName] as [string, string];
+        }
+
+        return [name, value] as [string, string];
+      });
+      const serializedAttributes = serializeAttributes(nextAttributes);
+      return `<sheet ${serializedAttributes}/>`;
+    },
+  ).replace(
+    /<definedName\b([^>]*)>([\s\S]*?)<\/definedName>/g,
+    (match, attributesSource, nameSource) => {
+      const nameText = decodeXmlText(nameSource);
+      const nextNameText = renameSheetFormulaReferences(nameText, currentSheetName, nextSheetName);
+      return nextNameText === nameText
+        ? match
+        : `<definedName${attributesSource}>${escapeXmlText(nextNameText)}</definedName>`;
+    },
+  );
+}
+
 function removeSheetFromWorkbookXml(
   workbookXml: string,
   relationshipId: string,
@@ -478,6 +586,32 @@ function removeSheetFromWorkbookXml(
       return `<definedName${serializedAttributes ? ` ${serializedAttributes}` : ""}>${escapeXmlText(nextNameText)}</definedName>`;
     },
   );
+}
+
+function renameHyperlinkLocation(
+  location: string,
+  currentSheetName: string,
+  nextSheetName: string,
+): string {
+  const hashPrefix = location.startsWith("#") ? "#" : "";
+  const target = hashPrefix ? location.slice(1) : location;
+  const bangIndex = target.indexOf("!");
+
+  if (bangIndex === -1) {
+    return location;
+  }
+
+  const sheetToken = target.slice(0, bangIndex);
+  const normalizedSheetName =
+    sheetToken.startsWith("'") && sheetToken.endsWith("'")
+      ? sheetToken.slice(1, -1).replaceAll("''", "'")
+      : sheetToken;
+
+  if (normalizedSheetName !== currentSheetName) {
+    return location;
+  }
+
+  return `${hashPrefix}${formatSheetNameForReference(nextSheetName)}${target.slice(bangIndex)}`;
 }
 
 function removeRelationshipById(relationshipsXml: string, relationshipId: string): string {
@@ -526,6 +660,14 @@ function updateAppSheetNames(appXml: string, sheetNames: string[]): string {
   }
 
   return nextAppXml;
+}
+
+function formatSheetNameForReference(sheetName: string): string {
+  if (/^[A-Za-z_][A-Za-z0-9_.]*$/.test(sheetName)) {
+    return sheetName;
+  }
+
+  return `'${sheetName.replaceAll("'", "''")}'`;
 }
 
 function parseRelationships(xml: string, baseDir: string): Map<string, string> {

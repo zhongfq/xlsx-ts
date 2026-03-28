@@ -52,9 +52,11 @@
 - `workbook.listEntries()`
 - `workbook.getSheets()`
 - `workbook.getSheet(name)`
+- `workbook.renameSheet(currentName, nextName)`
 - `workbook.addSheet(name)`
 - `workbook.deleteSheet(name)`
 - `sheet.cell(address)`
+- `sheet.rename(name)`
 - `sheet.getCell(address)`
 - `sheet.getHeaders(headerRowNumber?)`
 - `sheet.getRecord(rowNumber, headerRowNumber?)`
@@ -95,6 +97,8 @@ const sheet = workbook.getSheet("Sheet1");
 const scoreCell = sheet.cell("B2");
 const detailSheet = workbook.addSheet("Detail");
 
+workbook.renameSheet("Sheet1", "Summary");
+detailSheet.rename("Detail 2026");
 sheet.setCell("A1", "Hello");
 sheet.deleteRow(8);
 sheet.deleteColumn("G");
@@ -143,6 +147,7 @@ await workbook.save("output.xlsx");
 - `deleteRow()` / `deleteColumn()` 当前会同步更新本 sheet 的单元格坐标、公式引用、合并区域、`dimension`、常见 `ref/sqref` 属性、`definedNames`，以及其它 sheet 里显式引用它的公式
 - `insertRow()` 当前会同步更新本 sheet 的单元格坐标、公式引用、合并区域、`dimension`、常见 `ref/sqref` 属性、`definedNames`，以及其它 sheet 里显式引用它的公式
 - `insertColumn()` 当前会同步更新本 sheet 的单元格坐标、公式引用、合并区域、`dimension`、常见 `ref/sqref` 属性、`definedNames`，以及其它 sheet 里显式引用它的公式
+- `workbook.renameSheet()` / `sheet.rename()` 当前会同步维护 sheet 名、其它 sheet 的显式公式引用、`definedNames`、内部超链接位置和文档属性
 - `workbook.addSheet()` / `workbook.deleteSheet()` 当前会同步维护 `workbook.xml`、rels、`[Content_Types].xml`，并在删除 sheet 时修正剩余公式与 `definedNames`
 
 ## 当前限制

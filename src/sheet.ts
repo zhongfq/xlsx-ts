@@ -45,7 +45,7 @@ interface SheetIndex {
 }
 
 export class Sheet {
-  readonly name: string;
+  name: string;
   readonly path: string;
   readonly relationshipId: string;
 
@@ -82,6 +82,10 @@ export class Sheet {
 
   getCell(address: string): CellValue {
     return this.cell(address).value;
+  }
+
+  rename(name: string): void {
+    this.workbook.renameSheet(this.name, name);
   }
 
   getFormula(address: string): string | null {
@@ -2082,6 +2086,88 @@ export function deleteSheetFormulaReferences(formula: string, deletedSheetName: 
   return nextFormula;
 }
 
+export function renameSheetFormulaReferences(
+  formula: string,
+  previousSheetName: string,
+  nextSheetName: string,
+): string {
+  let nextFormula = "";
+  let cursor = 0;
+  let inString = false;
+
+  while (cursor < formula.length) {
+    const character = formula[cursor];
+
+    if (character === "\"") {
+      nextFormula += character;
+
+      if (inString && formula[cursor + 1] === "\"") {
+        nextFormula += "\"";
+        cursor += 2;
+        continue;
+      }
+
+      inString = !inString;
+      cursor += 1;
+      continue;
+    }
+
+    if (inString) {
+      nextFormula += character;
+      cursor += 1;
+      continue;
+    }
+
+    const remaining = formula.slice(cursor);
+    const rangeMatch = remaining.match(
+      /^((?:'[^']+'|[A-Za-z_][A-Za-z0-9_.]*)!)?(\$?)([A-Z]+)(\$?)(\d+):((?:'[^']+'|[A-Za-z_][A-Za-z0-9_.]*)!)?(\$?)([A-Z]+)(\$?)(\d+)/,
+    );
+
+    if (rangeMatch) {
+      const [
+        fullMatch,
+        startSheetRef,
+        startColumnDollar,
+        startColumnLabel,
+        startRowDollar,
+        startRowText,
+        endSheetRef,
+        endColumnDollar,
+        endColumnLabel,
+        endRowDollar,
+        endRowText,
+      ] = rangeMatch;
+      const nextStartSheetRef = renameSheetReferencePrefix(startSheetRef, previousSheetName, nextSheetName);
+      const nextEndSheetRef = renameSheetReferencePrefix(endSheetRef, previousSheetName, nextSheetName);
+
+      nextFormula +=
+        nextStartSheetRef === startSheetRef && nextEndSheetRef === endSheetRef
+          ? fullMatch
+          : `${nextStartSheetRef ?? ""}${startColumnDollar}${startColumnLabel}${startRowDollar}${startRowText}:${nextEndSheetRef ?? ""}${endColumnDollar}${endColumnLabel}${endRowDollar}${endRowText}`;
+      cursor += fullMatch.length;
+      continue;
+    }
+
+    const refMatch = remaining.match(/^((?:'[^']+'|[A-Za-z_][A-Za-z0-9_.]*)!)?(\$?)([A-Z]+)(\$?)(\d+)/);
+    if (!refMatch) {
+      nextFormula += character;
+      cursor += 1;
+      continue;
+    }
+
+    const [fullMatch, sheetRef, columnDollar, columnLabel, rowDollar, rowText] = refMatch;
+    const nextSheetRef = renameSheetReferencePrefix(sheetRef, previousSheetName, nextSheetName);
+
+    nextFormula +=
+      nextSheetRef === sheetRef
+        ? fullMatch
+        : `${nextSheetRef ?? ""}${columnDollar}${columnLabel}${rowDollar}${rowText}`;
+    cursor += fullMatch.length;
+  }
+
+  return nextFormula;
+}
+
 function matchesFormulaReference(
   sheetRef: string | undefined,
   targetSheetName: string,
@@ -2107,6 +2193,26 @@ function matchesSheetReference(sheetRef: string | undefined, targetSheetName: st
       : rawSheetName;
 
   return normalizedSheetName === targetSheetName;
+}
+
+function renameSheetReferencePrefix(
+  sheetRef: string | undefined,
+  previousSheetName: string,
+  nextSheetName: string,
+): string | undefined {
+  if (!matchesSheetReference(sheetRef, previousSheetName)) {
+    return sheetRef;
+  }
+
+  return `${formatSheetReference(nextSheetName)}!`;
+}
+
+function formatSheetReference(sheetName: string): string {
+  if (/^[A-Za-z_][A-Za-z0-9_.]*$/.test(sheetName)) {
+    return sheetName;
+  }
+
+  return `'${sheetName.replaceAll("'", "''")}'`;
 }
 
 function parseMergedRanges(sheetXml: string): string[] {

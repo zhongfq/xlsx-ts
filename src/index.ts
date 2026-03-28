@@ -10,4 +10,5 @@ export type {
   SetDefinedNameOptions,
   SetFormulaOptions,
   SetHyperlinkOptions,
+  SheetVisibility,
 } from "./types.js";

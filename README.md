@@ -52,6 +52,7 @@
 - `workbook.listEntries()`
 - `workbook.getSheets()`
 - `workbook.getSheet(name)`
+- `workbook.getSheetVisibility(name)`
 - `workbook.getDefinedNames()`
 - `workbook.getDefinedName(name, scope?)`
 - `workbook.setDefinedName(name, value, options?)`
@@ -59,6 +60,7 @@
 - `workbook.renameSheet(currentName, nextName)`
 - `workbook.addSheet(name)`
 - `workbook.deleteSheet(name)`
+- `workbook.setSheetVisibility(name, visibility)`
 - `sheet.cell(address)`
 - `sheet.rename(name)`
 - `sheet.getCell(address)`
@@ -113,6 +115,7 @@ const detailSheet = workbook.addSheet("Detail");
 workbook.setDefinedName("Scores", "Summary!$A$1:$B$10");
 workbook.setDefinedName("LocalScore", "$B$2", { scope: "Summary" });
 workbook.renameSheet("Sheet1", "Summary");
+workbook.setSheetVisibility("Summary", "hidden");
 detailSheet.rename("Detail 2026");
 console.log(sheet.getTables());
 console.log(sheet.getHyperlinks());
@@ -155,6 +158,7 @@ sheet.removeHyperlink("B2");
 sheet.removeAutoFilter();
 sheet.removeTable("Scores");
 detailSheet.setCell("A1", "created");
+workbook.setSheetVisibility("Summary", "visible");
 console.log(workbook.getDefinedNames(), workbook.getDefinedName("LocalScore", "Summary"));
 workbook.deleteDefinedName("LocalScore", "Summary");
 workbook.deleteSheet("Temp");
@@ -181,6 +185,7 @@ await workbook.save("output.xlsx");
 - `sheet.setHyperlink()` / `sheet.removeHyperlink()` 当前支持维护 worksheet `<hyperlinks>` 与外部链接对应的 sheet rel，内部链接 target 用 `#Sheet1!A1` 这种格式
 - 已有关联 table 在插删行列时会同步维护它们自己的 `ref` / `autoFilter`；如果整块 table 被删空，会从当前 sheet 的 `tableParts` 里移除
 - `workbook.getDefinedNames()` / `getDefinedName()` / `setDefinedName()` / `deleteDefinedName()` 当前支持读写全局和本地 `definedNames`
+- `workbook.getSheetVisibility()` / `setSheetVisibility()` 当前支持 `visible` / `hidden` / `veryHidden`；并会阻止把最后一张可见 sheet 隐藏掉
 - `workbook.renameSheet()` / `sheet.rename()` 当前会同步维护 sheet 名、其它 sheet 的显式公式引用、`definedNames`、内部超链接位置和文档属性
 - `workbook.addSheet()` / `workbook.deleteSheet()` 当前会同步维护 `workbook.xml`、rels、`[Content_Types].xml`，并在删除 sheet 时修正剩余公式与 `definedNames`
 

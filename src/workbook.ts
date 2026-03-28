@@ -1,4 +1,4 @@
-import type { ArchiveEntry, DefinedName, SetDefinedNameOptions } from "./types.js";
+import type { ArchiveEntry, DefinedName, SetDefinedNameOptions, SheetVisibility } from "./types.js";
 import { XlsxError } from "./errors.js";
 import {
   Sheet,
@@ -78,6 +78,46 @@ export class Workbook {
     }
 
     return sheet;
+  }
+
+  getSheetVisibility(sheetName: string): SheetVisibility {
+    const context = this.getWorkbookContext();
+    const sheet = context.sheets.find((candidate) => candidate.name === sheetName);
+    if (!sheet) {
+      throw new XlsxError(`Sheet not found: ${sheetName}`);
+    }
+
+    return parseSheetVisibility(this.readEntryText(context.workbookPath), sheet.relationshipId);
+  }
+
+  setSheetVisibility(sheetName: string, visibility: SheetVisibility): void {
+    assertSheetVisibility(visibility);
+
+    const context = this.getWorkbookContext();
+    const sheet = context.sheets.find((candidate) => candidate.name === sheetName);
+    if (!sheet) {
+      throw new XlsxError(`Sheet not found: ${sheetName}`);
+    }
+
+    const workbookPath = context.workbookPath;
+    const workbookXml = this.readEntryText(workbookPath);
+    const currentVisibility = parseSheetVisibility(workbookXml, sheet.relationshipId);
+
+    if (currentVisibility === visibility) {
+      return;
+    }
+
+    const visibleSheetCount = context.sheets.filter(
+      (candidate) => parseSheetVisibility(workbookXml, candidate.relationshipId) === "visible",
+    ).length;
+    if (currentVisibility === "visible" && visibility !== "visible" && visibleSheetCount === 1) {
+      throw new XlsxError("Workbook must contain at least one visible sheet");
+    }
+
+    this.writeEntryText(
+      workbookPath,
+      updateSheetVisibilityInWorkbookXml(workbookXml, sheet.relationshipId, visibility),
+    );
   }
 
   getDefinedNames(): DefinedName[] {
@@ -533,6 +573,12 @@ function assertDefinedName(name: string): void {
   }
 }
 
+function assertSheetVisibility(visibility: string): asserts visibility is SheetVisibility {
+  if (visibility !== "visible" && visibility !== "hidden" && visibility !== "veryHidden") {
+    throw new XlsxError(`Invalid sheet visibility: ${visibility}`);
+  }
+}
+
 function buildEmptyWorksheetXml(): string {
   return (
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
@@ -624,6 +670,58 @@ function renameSheetInWorkbookXml(
         : `<definedName${attributesSource}>${escapeXmlText(nextNameText)}</definedName>`;
     },
   );
+}
+
+function parseSheetVisibility(workbookXml: string, relationshipId: string): SheetVisibility {
+  for (const match of workbookXml.matchAll(/<sheet\b([^>]*?)\/>/g)) {
+    const attributesSource = match[1];
+    if (getXmlAttr(attributesSource, "r:id") !== relationshipId) {
+      continue;
+    }
+
+    const state = getXmlAttr(attributesSource, "state");
+    if (state === "hidden" || state === "veryHidden") {
+      return state;
+    }
+
+    return "visible";
+  }
+
+  throw new XlsxError(`Sheet relationship not found: ${relationshipId}`);
+}
+
+function updateSheetVisibilityInWorkbookXml(
+  workbookXml: string,
+  relationshipId: string,
+  visibility: SheetVisibility,
+): string {
+  let changed = false;
+
+  const nextWorkbookXml = workbookXml.replace(
+    /<sheet\b([^>]*?)\/>/g,
+    (match, attributesSource) => {
+      const attributes = parseAttributes(attributesSource);
+      const relationshipIndex = attributes.findIndex(([name]) => name === "r:id");
+
+      if (relationshipIndex === -1 || attributes[relationshipIndex]?.[1] !== relationshipId) {
+        return match;
+      }
+
+      changed = true;
+      const withoutState = attributes.filter(([name]) => name !== "state");
+      const nextAttributes =
+        visibility === "visible"
+          ? withoutState
+          : [...withoutState, ["state", visibility] as [string, string]];
+      return `<sheet ${serializeAttributes(nextAttributes)}/>`;
+    },
+  );
+
+  if (!changed) {
+    throw new XlsxError(`Sheet relationship not found: ${relationshipId}`);
+  }
+
+  return nextWorkbookXml;
 }
 
 function parseDefinedNames(workbookXml: string, sheets: Sheet[]): DefinedName[] {

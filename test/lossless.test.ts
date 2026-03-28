@@ -1078,6 +1078,59 @@ test("workbook can delete a sheet and rewrite remaining references", async () =>
   assert.doesNotMatch(appXml, /Sheet2/);
 });
 
+test("workbook sheet visibility APIs read and write hidden states", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    replaceEntryText(
+      withSecondSheet(
+        await loadFixtureEntries(fixtureDir),
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1"><v>1</v></c></row>
+  </sheetData>
+</worksheet>`,
+      ),
+      "xl/workbook.xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+    <sheet name="Sheet2" sheetId="2" r:id="rId3" state="hidden"/>
+  </sheets>
+</workbook>`,
+    ),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1"><v>1</v></c></row>
+  </sheetData>
+</worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+
+  assert.equal(workbook.getSheetVisibility("Sheet1"), "visible");
+  assert.equal(workbook.getSheetVisibility("Sheet2"), "hidden");
+
+  workbook.setSheetVisibility("Sheet2", "veryHidden");
+  assert.equal(workbook.getSheetVisibility("Sheet2"), "veryHidden");
+
+  assert.throws(
+    () => workbook.setSheetVisibility("Sheet1", "hidden"),
+    /Workbook must contain at least one visible sheet/,
+  );
+
+  workbook.setSheetVisibility("Sheet2", "visible");
+  workbook.setSheetVisibility("Sheet1", "hidden");
+
+  const workbookXml = entryText(workbook.toEntries(), "xl/workbook.xml");
+  assert.match(workbookXml, /<sheet name="Sheet1" sheetId="1" r:id="rId1" state="hidden"\/>/);
+  assert.match(workbookXml, /<sheet name="Sheet2" sheetId="2" r:id="rId3"\/>/);
+  assert.equal(workbook.getSheetVisibility("Sheet1"), "hidden");
+  assert.equal(workbook.getSheetVisibility("Sheet2"), "visible");
+});
+
 test("sheet rename updates workbook metadata, formulas, and hyperlink locations", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = replaceEntryText(

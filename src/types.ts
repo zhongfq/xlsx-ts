@@ -5,6 +5,7 @@ export interface ArchiveEntry {
 
 export type CellValue = string | number | boolean | null;
 export type CellType = "missing" | "blank" | "string" | "number" | "boolean" | "formula";
+export type SheetVisibility = "visible" | "hidden" | "veryHidden";
 
 export interface DefinedName {
   hidden: boolean;

@@ -1,0 +1,4 @@
+interface:
+  display_name: "XLSX Agent"
+  short_description: "Inspect and edit XLSX via CLI"
+  default_prompt: "Use $xlsx-agent to inspect or edit an XLSX workbook with the local xlsx-ts CLI."

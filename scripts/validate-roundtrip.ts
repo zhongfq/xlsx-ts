@@ -1,9 +1,6 @@
-import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { resolve } from "node:path";
 
-import { Workbook } from "../src/index.ts";
+import { validateRoundtripFile } from "../src/index.ts";
 
 const inputArg = process.argv[2];
 
@@ -13,69 +10,11 @@ if (!inputArg) {
 }
 
 const inputPath = resolve(inputArg);
-const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-validate-"));
-const outputPath = process.argv[3]
-  ? resolve(process.argv[3])
-  : join(tempRoot, `${basename(inputPath, ".xlsx")}.roundtrip.xlsx`);
+const result = await validateRoundtripFile(inputPath, process.argv[3] ? resolve(process.argv[3]) : undefined);
 
-try {
-  const document = await Workbook.open(inputPath);
-  await document.save(outputPath);
-
-  const source = await Workbook.open(inputPath);
-  const roundtrip = await Workbook.open(outputPath);
-  const sourceEntries = toEntryMap(source.toEntries());
-  const roundtripEntries = toEntryMap(roundtrip.toEntries());
-  const sourceKeys = [...sourceEntries.keys()].sort();
-  const roundtripKeys = [...roundtripEntries.keys()].sort();
-
-  assert.deepEqual(roundtripKeys, sourceKeys, "zip entry list changed after roundtrip");
-
-  const diffs: string[] = [];
-
-  for (const key of sourceKeys) {
-    const left = sourceEntries.get(key);
-    const right = roundtripEntries.get(key);
-
-    if (!left || !right || Buffer.compare(left, right) !== 0) {
-      diffs.push(key);
-    }
-  }
-
-  if (diffs.length > 0) {
-    console.error(
-      JSON.stringify(
-        {
-          input: inputPath,
-          output: outputPath,
-          entries: sourceKeys.length,
-          diffs,
-        },
-        null,
-        2,
-      ),
-    );
-    process.exit(2);
-  }
-
-  console.log(
-    JSON.stringify(
-      {
-        input: inputPath,
-        output: outputPath,
-        entries: sourceKeys.length,
-        diffs,
-      },
-      null,
-      2,
-    ),
-  );
-} finally {
-  if (!process.argv[3]) {
-    await rm(tempRoot, { recursive: true, force: true });
-  }
+if (!result.ok) {
+  console.error(JSON.stringify(result, null, 2));
+  process.exit(2);
 }
 
-function toEntryMap(entries: Array<{ path: string; data: Uint8Array }>): Map<string, Buffer> {
-  return new Map(entries.map((entry) => [entry.path, Buffer.from(entry.data)]));
-}
+console.log(JSON.stringify(result, null, 2));

@@ -1,5 +1,6 @@
 export { Cell } from "./cell.js";
 export { Sheet } from "./sheet.js";
+export { validateRoundtripFile } from "./roundtrip.js";
 export { Workbook } from "./workbook.js";
 export type {
   ArchiveEntry,

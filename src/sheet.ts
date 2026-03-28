@@ -28,6 +28,11 @@ interface LocatedCell {
   end: number;
   attributesSource: string;
   innerXml: string;
+  rawType: string | null;
+  styleId: number | null;
+  formulaSource: string | null;
+  valueSource: string | null;
+  inlineTextSources: string[] | null;
   rowNumber: number;
   columnNumber: number;
 }
@@ -49,6 +54,7 @@ interface SheetIndex {
   cells: Map<string, LocatedCell>;
   rows: Map<number, LocatedRow>;
   rowNumbers: number[];
+  usedBounds: UsedRangeBounds | null;
   sheetDataInnerStart: number;
   sheetDataInnerEnd: number;
 }
@@ -120,11 +126,11 @@ export class Sheet {
   }
 
   get rowCount(): number {
-    return getUsedBoundsFromCells(this.getSheetIndex().cells.values())?.maxRow ?? 0;
+    return this.getSheetIndex().usedBounds?.maxRow ?? 0;
   }
 
   get columnCount(): number {
-    return getUsedBoundsFromCells(this.getSheetIndex().cells.values())?.maxColumn ?? 0;
+    return this.getSheetIndex().usedBounds?.maxColumn ?? 0;
   }
 
   getHeaders(headerRowNumber = 1): string[] {
@@ -253,7 +259,7 @@ export class Sheet {
   }
 
   getUsedRange(): string | null {
-    return formatUsedRangeBounds(getUsedBoundsFromCells(this.getSheetIndex().cells.values()));
+    return formatUsedRangeBounds(this.getSheetIndex().usedBounds);
   }
 
   getMergedRanges(): string[] {
@@ -1080,18 +1086,16 @@ function parseCellSnapshot(
     };
   }
 
-  const rawType = getXmlAttr(cell.attributesSource, "t") ?? null;
-  const styleIdText = getXmlAttr(cell.attributesSource, "s");
-  const styleId = styleIdText === undefined ? null : Number(styleIdText);
-  const formulaText = extractCellFormulaText(cell.innerXml);
-  const formula = formulaText === undefined ? null : decodeXmlText(formulaText);
+  const rawType = cell.rawType;
+  const styleId = cell.styleId;
+  const formula = cell.formulaSource === null ? null : decodeXmlText(cell.formulaSource);
 
   if (formula !== null) {
     return {
       exists: true,
       formula,
       rawType,
-      styleId: Number.isFinite(styleId) ? styleId : null,
+      styleId,
       type: "formula",
       value: parseCellValue(workbook, cell, rawType),
     };
@@ -1111,7 +1115,7 @@ function parseCellSnapshot(
     exists: true,
     formula: null,
     rawType,
-    styleId: Number.isFinite(styleId) ? styleId : null,
+    styleId,
     type,
     value,
   };
@@ -1119,16 +1123,16 @@ function parseCellSnapshot(
 
 function parseCellValue(workbook: Workbook, cell: LocatedCell, rawType: string | null): CellValue {
   if (rawType === "inlineStr") {
-    return extractInlineStringTexts(cell.innerXml).map(decodeXmlText).join("");
+    return (cell.inlineTextSources ?? []).map(decodeXmlText).join("");
   }
 
   if (rawType === "str") {
-    const rawString = extractCellValueText(cell.innerXml);
-    return rawString === undefined ? null : decodeXmlText(rawString);
+    const rawString = cell.valueSource;
+    return rawString === null ? null : decodeXmlText(rawString);
   }
 
   if (rawType === "s") {
-    const indexText = extractCellValueText(cell.innerXml);
+    const indexText = cell.valueSource;
     if (!indexText) {
       return null;
     }
@@ -1137,11 +1141,11 @@ function parseCellValue(workbook: Workbook, cell: LocatedCell, rawType: string |
   }
 
   if (rawType === "b") {
-    return extractCellValueText(cell.innerXml) === "1";
+    return cell.valueSource === "1";
   }
 
-  const rawValue = extractCellValueText(cell.innerXml);
-  if (rawValue === undefined) {
+  const rawValue = cell.valueSource;
+  if (rawValue === null) {
     return null;
   }
 
@@ -1159,6 +1163,14 @@ function extractCellValueText(innerXml: string): string | undefined {
 
 function extractInlineStringTexts(innerXml: string): string[] {
   return Array.from(innerXml.matchAll(INLINE_STRING_TEXT_REGEX), (match) => match[1]);
+}
+
+function extractCellTypeAttr(attributesSource: string): string | null {
+  return attributesSource.match(CELL_TYPE_ATTR_REGEX)?.[1] ?? null;
+}
+
+function extractCellStyleAttr(attributesSource: string): string | undefined {
+  return attributesSource.match(CELL_STYLE_ATTR_REGEX)?.[1];
 }
 
 function buildValueCellXml(address: string, value: CellValue, existingAttributesSource?: string): string {
@@ -1559,6 +1571,11 @@ function buildSheetIndex(sheetXml: string): SheetIndex {
   const sheetDataInnerEnd = sheetDataMatch.index + sheetDataCloseTagStart;
   const rows = new Map<number, LocatedRow>();
   const cells = new Map<string, LocatedCell>();
+  let minRow = Number.POSITIVE_INFINITY;
+  let maxRow = 0;
+  let minColumn = Number.POSITIVE_INFINITY;
+  let maxColumn = 0;
+  let hasCells = false;
   const rowRegex = /<row\b([^>]*?\br="(\d+)"[^>]*?)\s*(?:>([\s\S]*?)<\/row>|\/>)/g;
 
   for (const match of sheetXml.matchAll(rowRegex)) {
@@ -1597,18 +1614,34 @@ function buildSheetIndex(sheetXml: string): SheetIndex {
         const fullCellMatch = cellMatch[0];
         const address = `${cellMatch[2].toUpperCase()}${cellMatch[3]}`;
         const cellStart = innerStart + cellMatch.index;
+        const attributesSource = cellMatch[1].trim();
+        const innerXml = cellMatch[4] ?? "";
+        const rawTypeText = extractCellTypeAttr(attributesSource);
+        const styleIdText = extractCellStyleAttr(attributesSource);
+        const formulaSource = extractCellFormulaText(innerXml) ?? null;
+        const valueSource = extractCellValueText(innerXml) ?? null;
         const cell: LocatedCell = {
           address,
           start: cellStart,
           end: cellStart + fullCellMatch.length,
-          attributesSource: cellMatch[1].trim(),
-          innerXml: cellMatch[4] ?? "",
+          attributesSource,
+          innerXml,
+          rawType: rawTypeText,
+          styleId: styleIdText === undefined ? null : Number(styleIdText),
+          formulaSource,
+          valueSource,
+          inlineTextSources: rawTypeText === "inlineStr" ? extractInlineStringTexts(innerXml) : null,
           rowNumber,
           columnNumber: columnLabelToNumber(cellMatch[2].toUpperCase()),
         };
 
         row.cells.push(cell);
         cells.set(address, cell);
+        hasCells = true;
+        minRow = Math.min(minRow, rowNumber);
+        maxRow = Math.max(maxRow, rowNumber);
+        minColumn = Math.min(minColumn, cell.columnNumber);
+        maxColumn = Math.max(maxColumn, cell.columnNumber);
       }
 
       row.cells.sort((left, right) => left.columnNumber - right.columnNumber);
@@ -1624,6 +1657,7 @@ function buildSheetIndex(sheetXml: string): SheetIndex {
     cells,
     rows,
     rowNumbers,
+    usedBounds: hasCells ? { minRow, maxRow, minColumn, maxColumn } : null,
     sheetDataInnerStart,
     sheetDataInnerEnd,
   };
@@ -3411,7 +3445,7 @@ function compareCellAddresses(left: string, right: string): number {
 }
 
 function updateDimensionRef(sheetIndex: SheetIndex): string {
-  const usedRange = formatUsedRangeBounds(getUsedBoundsFromCells(sheetIndex.cells.values()));
+  const usedRange = formatUsedRangeBounds(sheetIndex.usedBounds);
   const dimensionMatch = sheetIndex.xml.match(/<dimension\b([^>]*?)\/>/);
 
   if (!usedRange) {
@@ -3445,24 +3479,6 @@ function updateDimensionRef(sheetIndex: SheetIndex): string {
     dimensionXml +
     sheetIndex.xml.slice(worksheetOpenTagMatch.index + worksheetOpenTagMatch[0].length)
   );
-}
-
-function getUsedBoundsFromCells(cells: Iterable<LocatedCell>): UsedRangeBounds | null {
-  let minRow = Number.POSITIVE_INFINITY;
-  let maxRow = 0;
-  let minColumn = Number.POSITIVE_INFINITY;
-  let maxColumn = 0;
-  let hasCells = false;
-
-  for (const cell of cells) {
-    hasCells = true;
-    minRow = Math.min(minRow, cell.rowNumber);
-    maxRow = Math.max(maxRow, cell.rowNumber);
-    minColumn = Math.min(minColumn, cell.columnNumber);
-    maxColumn = Math.max(maxColumn, cell.columnNumber);
-  }
-
-  return hasCells ? { minRow, maxRow, minColumn, maxColumn } : null;
 }
 
 function formatUsedRangeBounds(bounds: UsedRangeBounds | null): string | null {
@@ -3503,6 +3519,8 @@ const TABLE_CONTENT_TYPE =
   "application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml";
 const HYPERLINK_RELATIONSHIP_TYPE =
   "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
+const CELL_TYPE_ATTR_REGEX = /\bt="([^"]*)"/;
+const CELL_STYLE_ATTR_REGEX = /\bs="([^"]*)"/;
 const CELL_FORMULA_REGEX = /<f\b[^>]*>([\s\S]*?)<\/f>/;
 const CELL_VALUE_REGEX = /<v\b[^>]*>([\s\S]*?)<\/v>/;
 const INLINE_STRING_TEXT_REGEX = /<t\b[^>]*>([\s\S]*?)<\/t>/g;

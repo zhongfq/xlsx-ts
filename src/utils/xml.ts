@@ -1,6 +1,15 @@
 const ATTRIBUTE_REGEX = /([A-Za-z_][\w:.-]*)="([^"]*)"/g;
 
 export function escapeXmlText(value: string): string {
+  if (
+    !value.includes("&") &&
+    !value.includes("<") &&
+    !value.includes(">") &&
+    !value.includes("\"")
+  ) {
+    return value;
+  }
+
   return value
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -9,6 +18,10 @@ export function escapeXmlText(value: string): string {
 }
 
 export function decodeXmlText(value: string): string {
+  if (!value.includes("&")) {
+    return value;
+  }
+
   return value
     .replaceAll("&lt;", "<")
     .replaceAll("&gt;", ">")

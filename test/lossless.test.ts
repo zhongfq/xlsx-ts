@@ -95,6 +95,25 @@ test("formula cells can be read and updated without dropping styles", async () =
   assert.match(sheetXml, /<v>Hello<\/v>/);
 });
 
+test("formula cells with self-closing string cached values read as empty strings", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1" s="1" t="str"><f>IF(1=0,"x","")</f><v/></c></row>
+  </sheetData>
+</worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  assert.equal(sheet.getFormula("A1"), 'IF(1=0,"x","")');
+  assert.equal(sheet.getCell("A1"), "");
+});
+
 test("cell handle objects cache parsed state and refresh after writes", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = await loadFixtureEntries(fixtureDir);

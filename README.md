@@ -68,13 +68,17 @@
 - `sheet.rename(name)`
 - `sheet.getCell(address)`
 - `sheet.getCell(rowNumber, column)`
+- `sheet.getCellEntries()`
+- `sheet.iterCellEntries()`
 - `sheet.rowCount`
 - `sheet.columnCount`
 - `sheet.getHeaders(headerRowNumber?)`
 - `sheet.getRecord(rowNumber, headerRowNumber?)`
 - `sheet.getRecords(headerRowNumber?)`
 - `sheet.getColumn(column)`
+- `sheet.getColumnEntries(column)`
 - `sheet.getRow(rowNumber)`
+- `sheet.getRowEntries(rowNumber)`
 - `sheet.getRange(range)`
 - `sheet.getUsedRange()`
 - `sheet.getMergedRanges()`
@@ -192,6 +196,7 @@ await workbook.save("output.xlsx");
 - `sheet.cell()` / `getCell()` / `setCell()` / `getFormula()` / `setFormula()` 现在同时支持 `A1` 地址和 `(rowNumber, column)` 两种调用方式；行列索引是从 `1` 开始
 - 后续 `getCell` / `getFormula` 会直接走索引查找，不再每次整张表做字符串匹配
 - `sheet.rowCount` / `sheet.columnCount` 当前表示已用区域的最大行号 / 最大列号；空表返回 `0`
+- `sheet.getCellEntries()` / `iterCellEntries()` / `getRowEntries()` / `getColumnEntries()` 会按 worksheet 中真实存在的 `<c>` 节点返回带地址、行列号、类型、样式索引和值的对象，适合大表和稀疏表遍历
 - 每次写入后会重建该表索引，保证后续读取拿到的是最新结果
 - 修改工作表后会同步维护 `<dimension ref="...">`，避免使用范围信息过期
 - `deleteRow()` / `deleteColumn()` 当前会同步更新本 sheet 的单元格坐标、公式引用、合并区域、`dimension`、常见 `ref/sqref` 属性、`definedNames`，以及其它 sheet 里显式引用它的公式

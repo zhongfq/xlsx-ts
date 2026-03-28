@@ -1,5 +1,6 @@
 import { Cell } from "./cell.js";
 import type {
+  CellEntry,
   CellSnapshot,
   CellValue,
   DataValidation,
@@ -134,6 +135,17 @@ export class Sheet {
     return values;
   }
 
+  getRowEntries(rowNumber: number): CellEntry[] {
+    assertRowNumber(rowNumber);
+
+    const row = this.getSheetIndex().rows.get(rowNumber);
+    if (!row) {
+      return [];
+    }
+
+    return row.cells.map((cell) => createCellEntry(cell));
+  }
+
   getColumn(column: number | string): CellValue[] {
     const columnNumber = normalizeColumnNumber(column);
     const cells = [...this.getSheetIndex().cells.values()]
@@ -152,6 +164,21 @@ export class Sheet {
     }
 
     return values;
+  }
+
+  getColumnEntries(column: number | string): CellEntry[] {
+    const columnNumber = normalizeColumnNumber(column);
+    const entries: CellEntry[] = [];
+    const index = this.getSheetIndex();
+
+    for (const rowNumber of index.rowNumbers) {
+      const cell = index.rows.get(rowNumber)?.cellsByColumn[columnNumber];
+      if (cell) {
+        entries.push(createCellEntry(cell));
+      }
+    }
+
+    return entries;
   }
 
   getRecords(headerRowNumber = 1): Array<Record<string, CellValue>> {
@@ -234,6 +261,25 @@ export class Sheet {
     }
 
     return values;
+  }
+
+  getCellEntries(): CellEntry[] {
+    return Array.from(this.iterCellEntries());
+  }
+
+  *iterCellEntries(): IterableIterator<CellEntry> {
+    const index = this.getSheetIndex();
+
+    for (const rowNumber of index.rowNumbers) {
+      const row = index.rows.get(rowNumber);
+      if (!row) {
+        continue;
+      }
+
+      for (const cell of row.cells) {
+        yield createCellEntry(cell);
+      }
+    }
   }
 
   getUsedRange(): string | null {
@@ -2488,6 +2534,15 @@ function updateMergedRanges(sheetXml: string, ranges: string[]): string {
 
   const anchorIndex = insertionIndex + sheetDataCloseTag.length;
   return sheetXml.slice(0, anchorIndex) + mergeCellsXml + sheetXml.slice(anchorIndex);
+}
+
+function createCellEntry(cell: LocatedCell): CellEntry {
+  return {
+    address: cell.address,
+    rowNumber: cell.rowNumber,
+    columnNumber: cell.columnNumber,
+    ...cell.snapshot,
+  };
 }
 
 function rewriteTableReferenceXml(

@@ -4,7 +4,7 @@ import { mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { Workbook } from "../src/index.ts";
+import { Workbook, type CellEntry } from "../src/index.ts";
 
 test("roundtrip keeps extracted parts identical", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
@@ -813,6 +813,42 @@ test("column APIs read sparse columns and write from a row offset", async () => 
   assert.match(sheetXml, /<row r="2"><c r="C2" t="inlineStr"><is><t>Q1<\/t><\/is><\/c><\/row>/);
   assert.match(sheetXml, /<row r="3"><c r="C3"\/><\/row>/);
   assert.match(sheetXml, /<row r="4"><c r="C4" t="inlineStr"><is><t>Q3<\/t><\/is><\/c><\/row>/);
+});
+
+test("entry APIs iterate existing worksheet cells without dense null scans", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = await loadFixtureEntries(fixtureDir);
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.setRow(2, ["Name", null, 98]);
+  sheet.setCell("C4", "Tail");
+
+  assert.deepEqual(
+    summarizeCellEntries(sheet.getRowEntries(2)),
+    [
+      { address: "A2", rowNumber: 2, columnNumber: 1, type: "string", value: "Name" },
+      { address: "B2", rowNumber: 2, columnNumber: 2, type: "blank", value: null },
+      { address: "C2", rowNumber: 2, columnNumber: 3, type: "number", value: 98 },
+    ],
+  );
+  assert.deepEqual(
+    summarizeCellEntries(sheet.getColumnEntries("C")),
+    [
+      { address: "C2", rowNumber: 2, columnNumber: 3, type: "number", value: 98 },
+      { address: "C4", rowNumber: 4, columnNumber: 3, type: "string", value: "Tail" },
+    ],
+  );
+
+  const allEntries = summarizeCellEntries(sheet.getCellEntries());
+  assert.deepEqual(allEntries, [
+    { address: "A1", rowNumber: 1, columnNumber: 1, type: "string", value: "Hello" },
+    { address: "A2", rowNumber: 2, columnNumber: 1, type: "string", value: "Name" },
+    { address: "B2", rowNumber: 2, columnNumber: 2, type: "blank", value: null },
+    { address: "C2", rowNumber: 2, columnNumber: 3, type: "number", value: 98 },
+    { address: "C4", rowNumber: 4, columnNumber: 3, type: "string", value: "Tail" },
+  ]);
+  assert.deepEqual(summarizeCellEntries([...sheet.iterCellEntries()]), allEntries);
 });
 
 test("header APIs read and write header rows", async () => {
@@ -1694,6 +1730,22 @@ function replaceEntryText(
   }
 
   return nextEntries;
+}
+
+function summarizeCellEntries(entries: CellEntry[]): Array<{
+  address: string;
+  rowNumber: number;
+  columnNumber: number;
+  type: CellEntry["type"];
+  value: CellEntry["value"];
+}> {
+  return entries.map((entry) => ({
+    address: entry.address,
+    rowNumber: entry.rowNumber,
+    columnNumber: entry.columnNumber,
+    type: entry.type,
+    value: entry.value,
+  }));
 }
 
 function withSecondSheet(

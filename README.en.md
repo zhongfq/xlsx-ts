@@ -73,13 +73,17 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `sheet.rename(name)`
 - `sheet.getCell(address)`
 - `sheet.getCell(rowNumber, column)`
+- `sheet.getCellEntries()`
+- `sheet.iterCellEntries()`
 - `sheet.rowCount`
 - `sheet.columnCount`
 - `sheet.getHeaders(headerRowNumber?)`
 - `sheet.getRecord(rowNumber, headerRowNumber?)`
 - `sheet.getRecords(headerRowNumber?)`
 - `sheet.getColumn(column)`
+- `sheet.getColumnEntries(column)`
 - `sheet.getRow(rowNumber)`
+- `sheet.getRowEntries(rowNumber)`
 - `sheet.getRange(range)`
 - `sheet.getUsedRange()`
 - `sheet.getMergedRanges()`
@@ -197,6 +201,7 @@ Notes:
 - `sheet.cell()`, `getCell()`, `setCell()`, `getFormula()`, and `setFormula()` now support both `A1` addresses and `(rowNumber, column)` calls. Row and column indexes are 1-based.
 - Later `getCell()` and `getFormula()` calls use those indexes directly instead of running a full string match on every read.
 - `sheet.rowCount` and `sheet.columnCount` currently mean the maximum used row number and maximum used column number. Empty sheets return `0`.
+- `sheet.getCellEntries()`, `iterCellEntries()`, `getRowEntries()`, and `getColumnEntries()` expose the real worksheet `<c>` nodes with address, row/column indexes, type, style id, and value, which is useful for large or sparse sheet iteration.
 - After each write, the sheet index is rebuilt so later reads always see the latest content.
 - Worksheet edits keep `<dimension ref="...">` in sync so used-range metadata does not go stale.
 - `deleteRow()` and `deleteColumn()` currently update cell coordinates, formulas, merged ranges, worksheet `dimension`, common `ref` and `sqref` attributes, `definedNames`, and explicit formulas in other sheets that reference the edited sheet.

@@ -16,6 +16,12 @@ export interface CellSnapshot {
   value: CellValue;
 }
 
+export interface CellEntry extends CellSnapshot {
+  address: string;
+  rowNumber: number;
+  columnNumber: number;
+}
+
 export interface DefinedName {
   hidden: boolean;
   name: string;

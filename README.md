@@ -1,5 +1,7 @@
 # xlsx-ts
 
+[English README](README.en.md)
+
 一个以“无损优先”为核心的 XLSX 读写库原型。
 
 目标不是先把 Excel 全模型映射成庞大的 JS 对象，而是先保证这一条底线：

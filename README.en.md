@@ -1,0 +1,237 @@
+# xlsx-ts
+
+[中文 README](README.md)
+
+A prototype XLSX reader/writer built around a "lossless first" principle.
+
+The goal is not to map the entire Excel object model into a huge JS object graph first.
+The first baseline is simpler and stricter:
+
+`read(xlsx) -> write(xlsx)`
+
+After that roundtrip, the extracted package parts should stay byte-for-byte identical unless a part was intentionally edited.
+
+Once that baseline holds, styles, themes, comments, relationship files, and unknown extension nodes are preserved naturally.
+Then higher-level APIs can be added on top with much lower risk.
+
+## Design
+
+The library is split into two layers:
+
+1. `Lossless package layer`
+   - Treat an `.xlsx` file as a zip package.
+   - Keep every entry as raw bytes first.
+   - Write untouched entries back exactly as they were, without re-serialization.
+
+2. `Editable workbook layer`
+   - Apply targeted XML patches only to the parts that actually need to change.
+   - The current prototype supports:
+     - reading sheet lists
+     - reading cells
+     - writing cells
+     - reading formulas
+     - writing formulas
+   - Style-related `s="..."` attributes are preserved, so styles are not lost when values change.
+
+## Why This Works For Style Preservation
+
+Most style loss is not caused by failing to parse `styles.xml`.
+It usually happens because the workbook is regenerated wholesale on write, which tends to break things like:
+
+- unknown nodes
+- attribute ordering
+- namespaces and extension markers
+- relationship file ordering
+- coupling between shared strings, worksheets, and styles
+
+The lossless-first direction flips that approach:
+
+- preserve every package part first
+- edit only the parts that must change
+- write untouched parts back exactly as-is
+
+That makes it much easier to satisfy a strict "roundtrip without diffs" requirement.
+
+## Current API
+
+- `Workbook.open(path)`
+- `Workbook.fromEntries(entries)`
+- `workbook.listEntries()`
+- `workbook.getSheets()`
+- `workbook.getSheet(name)`
+- `workbook.getSheetVisibility(name)`
+- `workbook.getDefinedNames()`
+- `workbook.getDefinedName(name, scope?)`
+- `workbook.setDefinedName(name, value, options?)`
+- `workbook.deleteDefinedName(name, scope?)`
+- `workbook.renameSheet(currentName, nextName)`
+- `workbook.addSheet(name)`
+- `workbook.deleteSheet(name)`
+- `workbook.setSheetVisibility(name, visibility)`
+- `sheet.cell(address)`
+- `sheet.rename(name)`
+- `sheet.getCell(address)`
+- `sheet.getHeaders(headerRowNumber?)`
+- `sheet.getRecord(rowNumber, headerRowNumber?)`
+- `sheet.getRecords(headerRowNumber?)`
+- `sheet.getColumn(column)`
+- `sheet.getRow(rowNumber)`
+- `sheet.getRange(range)`
+- `sheet.getUsedRange()`
+- `sheet.getMergedRanges()`
+- `sheet.getAutoFilter()`
+- `sheet.getTables()`
+- `sheet.getHyperlinks()`
+- `sheet.addTable(range, options?)`
+- `sheet.removeTable(name)`
+- `sheet.setHyperlink(address, target, options?)`
+- `sheet.removeHyperlink(address)`
+- `sheet.setAutoFilter(range)`
+- `sheet.removeAutoFilter()`
+- `sheet.setCell(address, value)`
+- `sheet.deleteRow(row, count?)`
+- `sheet.deleteColumn(column, count?)`
+- `sheet.insertRow(row, count?)`
+- `sheet.insertColumn(column, count?)`
+- `sheet.setHeaders(headers, headerRowNumber?, startColumn?)`
+- `sheet.setRecord(rowNumber, record, headerRowNumber?)`
+- `sheet.setRecords(records, headerRowNumber?)`
+- `sheet.deleteRecord(rowNumber, headerRowNumber?)`
+- `sheet.deleteRecords(rowNumbers, headerRowNumber?)`
+- `sheet.addRecord(record, headerRowNumber?)`
+- `sheet.addRecords(records, headerRowNumber?)`
+- `sheet.appendRow(values, startColumn?)`
+- `sheet.appendRows(rows, startColumn?)`
+- `sheet.setColumn(column, values, startRow?)`
+- `sheet.setRow(rowNumber, values, startColumn?)`
+- `sheet.setRange(startAddress, values)`
+- `sheet.addMergedRange(range)`
+- `sheet.removeMergedRange(range)`
+- `sheet.getFormula(address)`
+- `sheet.setFormula(address, formula, options?)`
+- `workbook.save(path)`
+
+Example:
+
+```ts
+const workbook = await Workbook.open("input.xlsx");
+const sheet = workbook.getSheet("Sheet1");
+const scoreCell = sheet.cell("B2");
+const detailSheet = workbook.addSheet("Detail");
+
+workbook.setDefinedName("Scores", "Summary!$A$1:$B$10");
+workbook.setDefinedName("LocalScore", "$B$2", { scope: "Summary" });
+workbook.renameSheet("Sheet1", "Summary");
+workbook.setSheetVisibility("Summary", "hidden");
+detailSheet.rename("Detail 2026");
+console.log(sheet.getTables());
+console.log(sheet.getHyperlinks());
+sheet.addTable("A1:B10", { name: "Scores" });
+sheet.setHyperlink("A1", "https://example.com", { text: "Hello", tooltip: "Open link" });
+sheet.setHyperlink("B2", "#Summary!A1");
+sheet.setAutoFilter("A1:F20");
+sheet.setCell("A1", "Hello");
+sheet.deleteRow(8);
+sheet.deleteColumn("G");
+sheet.insertRow(2);
+sheet.setHeaders(["Name", "Score"]);
+sheet.insertColumn("B");
+sheet.setRecord(2, { Name: "Alice", Score: 98 });
+sheet.setRecords([
+  { Name: "Alice", Score: 98 },
+  { Name: "Bob", Score: 87 },
+]);
+sheet.deleteRecord(4);
+sheet.deleteRecords([6, 7]);
+sheet.addRecord({ Name: "Alice", Score: 98 });
+sheet.addRecords([
+  { Name: "Bob", Score: 87 },
+  { Name: "Cara", Score: 91 },
+]);
+sheet.appendRow(["tail", 1]);
+sheet.appendRows([
+  ["tail-2", 2],
+  ["tail-3", 3],
+]);
+sheet.setColumn("F", ["Q1", "Q2"], 2);
+sheet.setRow(5, ["Name", "Score"], 2);
+sheet.setRange("B2", [
+  [1, 2],
+  [3, 4],
+]);
+sheet.addMergedRange("D1:E1");
+sheet.setFormula("B1", "SUM(1,2)", { cachedValue: 3 });
+sheet.removeHyperlink("B2");
+sheet.removeAutoFilter();
+sheet.removeTable("Scores");
+detailSheet.setCell("A1", "created");
+workbook.setSheetVisibility("Summary", "visible");
+console.log(workbook.getDefinedNames(), workbook.getDefinedName("LocalScore", "Summary"));
+workbook.deleteDefinedName("LocalScore", "Summary");
+workbook.deleteSheet("Temp");
+console.log(scoreCell.value, scoreCell.styleId, scoreCell.formula);
+
+await workbook.save("output.xlsx");
+```
+
+Notes:
+
+- On first read/write access, a sheet scans `sheetData` once and builds indexes for rows and cells.
+- `sheet.cell(address)` returns a reusable `Cell` handle whose parsed value/formula/style state is cached by sheet revision.
+- Later `getCell()` and `getFormula()` calls use those indexes directly instead of running a full string match on every read.
+- After each write, the sheet index is rebuilt so later reads always see the latest content.
+- Worksheet edits keep `<dimension ref="...">` in sync so used-range metadata does not go stale.
+- `deleteRow()` and `deleteColumn()` currently update cell coordinates, formulas, merged ranges, worksheet `dimension`, common `ref` and `sqref` attributes, `definedNames`, and explicit formulas in other sheets that reference the edited sheet.
+- `insertRow()` currently updates cell coordinates, formulas, merged ranges, worksheet `dimension`, common `ref` and `sqref` attributes, `definedNames`, and explicit formulas in other sheets that reference the edited sheet.
+- `insertColumn()` currently updates cell coordinates, formulas, merged ranges, worksheet `dimension`, common `ref` and `sqref` attributes, `definedNames`, and explicit formulas in other sheets that reference the edited sheet.
+- `sheet.getTables()` currently reads existing table names, display names, ranges, and part paths.
+- `sheet.getHyperlinks()` currently reads internal and external hyperlinks from the sheet; external link targets are resolved through the sheet relationships part.
+- `sheet.getAutoFilter()`, `sheet.setAutoFilter()`, and `sheet.removeAutoFilter()` currently manage the worksheet-level `autoFilter`; removing it also clears the top-level `sortState`.
+- `sheet.addTable()` currently creates the basic table part, sheet relationship, `[Content_Types].xml` override, and table XML. Column names default to the first row in the range, and blank names fall back to `ColumnN`.
+- `sheet.removeTable()` currently removes the current sheet's `tableParts`, sheet relationship, table XML, and matching content type override.
+- Existing linked tables keep their own `ref` and `autoFilter` updated during row and column insert/delete operations. If a table becomes empty, its `tableParts` entry is removed from the sheet.
+- `sheet.setHyperlink()` and `sheet.removeHyperlink()` currently manage worksheet `<hyperlinks>` plus the matching sheet relationship for external links. Internal targets use a format like `#Sheet1!A1`.
+- `workbook.getDefinedNames()`, `getDefinedName()`, `setDefinedName()`, and `deleteDefinedName()` currently support both global and local defined names.
+- `workbook.getSheetVisibility()` and `setSheetVisibility()` currently support `visible`, `hidden`, and `veryHidden`, and prevent hiding the last visible sheet in the workbook.
+- `workbook.renameSheet()` and `sheet.rename()` currently update sheet names, explicit formula references in other sheets, `definedNames`, internal hyperlink locations, and document properties.
+- `workbook.addSheet()` and `workbook.deleteSheet()` currently maintain `workbook.xml`, workbook rels, and `[Content_Types].xml`, and adjust remaining formulas and `definedNames` when a sheet is deleted.
+
+## Current Limits
+
+- The zip backend currently depends on system `python3` and `zip`.
+- String writes use `inlineStr` to avoid rebuilding `sharedStrings.xml` for simple value updates.
+- APIs for merged comments, rich text, images, and similar parts are still missing.
+- XML writes are implemented as local patches, not as a full OOXML object model.
+
+## Development
+
+```bash
+npm run build
+npm test
+npm run validate:task
+```
+
+Where:
+
+- `npm test` runs the TypeScript tests through `tsx`
+- `npm run validate:task` runs the TypeScript validation script through `tsx`
+- `npm run build` only produces `dist`
+
+The test suite currently checks two things:
+
+1. After an untouched roundtrip, every package part remains byte-for-byte identical.
+2. After editing a styled cell, the style index is still preserved and `styles.xml` stays unchanged.
+
+## Real File Validation
+
+[`res/task.xlsx`](/Users/codetypes/Desktop/Github/xlsx-ts/res/task.xlsx) in the repository is a useful regression sample.
+
+```bash
+npm run validate:task
+```
+
+To validate any other file:
+
+```bash
+npm run validate:roundtrip -- path/to/file.xlsx
+```

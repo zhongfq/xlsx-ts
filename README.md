@@ -52,6 +52,10 @@
 - `workbook.listEntries()`
 - `workbook.getSheets()`
 - `workbook.getSheet(name)`
+- `workbook.getDefinedNames()`
+- `workbook.getDefinedName(name, scope?)`
+- `workbook.setDefinedName(name, value, options?)`
+- `workbook.deleteDefinedName(name, scope?)`
 - `workbook.renameSheet(currentName, nextName)`
 - `workbook.addSheet(name)`
 - `workbook.deleteSheet(name)`
@@ -100,6 +104,8 @@ const sheet = workbook.getSheet("Sheet1");
 const scoreCell = sheet.cell("B2");
 const detailSheet = workbook.addSheet("Detail");
 
+workbook.setDefinedName("Scores", "Summary!$A$1:$B$10");
+workbook.setDefinedName("LocalScore", "$B$2", { scope: "Summary" });
 workbook.renameSheet("Sheet1", "Summary");
 detailSheet.rename("Detail 2026");
 console.log(sheet.getTables());
@@ -137,6 +143,8 @@ sheet.addMergedRange("D1:E1");
 sheet.setFormula("B1", "SUM(1,2)", { cachedValue: 3 });
 sheet.removeTable("Scores");
 detailSheet.setCell("A1", "created");
+console.log(workbook.getDefinedNames(), workbook.getDefinedName("LocalScore", "Summary"));
+workbook.deleteDefinedName("LocalScore", "Summary");
 workbook.deleteSheet("Temp");
 console.log(scoreCell.value, scoreCell.styleId, scoreCell.formula);
 
@@ -157,6 +165,7 @@ await workbook.save("output.xlsx");
 - `sheet.addTable()` 当前会创建最基础的 table part、sheet rel、`[Content_Types].xml` override 和 table XML；列名默认取范围首行，空列名会回退到 `ColumnN`
 - `sheet.removeTable()` 当前会同步移除当前 sheet 的 `tableParts`、sheet rel、table XML 和对应的 content type override
 - 已有关联 table 在插删行列时会同步维护它们自己的 `ref` / `autoFilter`；如果整块 table 被删空，会从当前 sheet 的 `tableParts` 里移除
+- `workbook.getDefinedNames()` / `getDefinedName()` / `setDefinedName()` / `deleteDefinedName()` 当前支持读写全局和本地 `definedNames`
 - `workbook.renameSheet()` / `sheet.rename()` 当前会同步维护 sheet 名、其它 sheet 的显式公式引用、`definedNames`、内部超链接位置和文档属性
 - `workbook.addSheet()` / `workbook.deleteSheet()` 当前会同步维护 `workbook.xml`、rels、`[Content_Types].xml`，并在删除 sheet 时修正剩余公式与 `definedNames`
 

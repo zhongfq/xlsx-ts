@@ -1147,6 +1147,84 @@ test("sheet rename updates workbook metadata, formulas, and hyperlink locations"
   assert.match(appXml, /<vt:lpstr>Data Set<\/vt:lpstr><vt:lpstr>Sheet2<\/vt:lpstr>/);
 });
 
+test("workbook defined name APIs read, write, and delete global and local names", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    replaceEntryText(
+      await loadFixtureEntries(fixtureDir),
+      "xl/workbook.xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+  <definedNames>
+    <definedName name="GlobalValue">Sheet1!$A$1</definedName>
+    <definedName name="LocalValue" localSheetId="0">$B$2</definedName>
+  </definedNames>
+</workbook>`,
+    ),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1"><v>1</v></c></row>
+    <row r="2"><c r="B2"><v>2</v></c></row>
+  </sheetData>
+</worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+
+  assert.deepEqual(workbook.getDefinedNames(), [
+    { hidden: false, name: "GlobalValue", scope: null, value: "Sheet1!$A$1" },
+    { hidden: false, name: "LocalValue", scope: "Sheet1", value: "$B$2" },
+  ]);
+  assert.equal(workbook.getDefinedName("GlobalValue"), "Sheet1!$A$1");
+  assert.equal(workbook.getDefinedName("LocalValue", "Sheet1"), "$B$2");
+
+  workbook.setDefinedName("GlobalValue", "Sheet1!$C$3");
+  workbook.setDefinedName("NewLocal", "$D$4", { scope: "Sheet1" });
+
+  let workbookXml = entryText(workbook.toEntries(), "xl/workbook.xml");
+  assert.match(workbookXml, /<definedName name="GlobalValue">Sheet1!\$C\$3<\/definedName>/);
+  assert.match(workbookXml, /<definedName name="NewLocal" localSheetId="0">\$D\$4<\/definedName>/);
+
+  workbook.deleteDefinedName("LocalValue", "Sheet1");
+  workbook.deleteDefinedName("GlobalValue");
+
+  workbookXml = entryText(workbook.toEntries(), "xl/workbook.xml");
+  assert.doesNotMatch(workbookXml, /LocalValue/);
+  assert.doesNotMatch(workbookXml, /GlobalValue/);
+  assert.match(workbookXml, /<definedName name="NewLocal" localSheetId="0">\$D\$4<\/definedName>/);
+  assert.deepEqual(workbook.getDefinedNames(), [
+    { hidden: false, name: "NewLocal", scope: "Sheet1", value: "$D$4" },
+  ]);
+});
+
+test("deleting the last defined name removes the definedNames container", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/workbook.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+  <definedNames>
+    <definedName name="OnlyOne">Sheet1!$A$1</definedName>
+  </definedNames>
+</workbook>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+
+  workbook.deleteDefinedName("OnlyOne");
+
+  const workbookXml = entryText(workbook.toEntries(), "xl/workbook.xml");
+  assert.doesNotMatch(workbookXml, /<definedNames>/);
+  assert.deepEqual(workbook.getDefinedNames(), []);
+});
+
 async function loadFixtureEntries(rootDirectory: string): Promise<Array<{ path: string; data: Uint8Array }>> {
   const entries: Array<{ path: string; data: Uint8Array }> = [];
   const stack = [rootDirectory];

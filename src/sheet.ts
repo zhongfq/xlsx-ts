@@ -2,6 +2,7 @@ import { Cell } from "./cell.js";
 import type { CellType, CellValue, SetFormulaOptions } from "./types.js";
 import { XlsxError } from "./errors.js";
 import type { Workbook } from "./workbook.js";
+import { basenamePosix, dirnamePosix, resolvePosix } from "./utils/path.js";
 import {
   decodeXmlText,
   escapeRegex,
@@ -42,6 +43,11 @@ interface SheetIndex {
   rowNumbers: number[];
   sheetDataInnerStart: number;
   sheetDataInnerEnd: number;
+}
+
+interface TableReference {
+  relationshipId: string;
+  path: string;
 }
 
 export class Sheet {
@@ -242,6 +248,31 @@ export class Sheet {
     return parseMergedRanges(this.getSheetIndex().xml);
   }
 
+  getTables(): Array<{ name: string; displayName: string; range: string; path: string }> {
+    const tables: Array<{ name: string; displayName: string; range: string; path: string }> = [];
+
+    for (const table of this.getTableReferences()) {
+      const tableXml = this.workbook.readEntryText(table.path);
+      const tableTagMatch = tableXml.match(/<table\b([^>]*?)>/);
+      if (!tableTagMatch) {
+        continue;
+      }
+
+      const attributesSource = tableTagMatch[1];
+      const name = getXmlAttr(attributesSource, "name");
+      const displayName = getXmlAttr(attributesSource, "displayName");
+      const range = getXmlAttr(attributesSource, "ref");
+
+      if (!name || !displayName || !range) {
+        continue;
+      }
+
+      tables.push({ name, displayName, range: normalizeRangeRef(range), path: table.path });
+    }
+
+    return tables;
+  }
+
   insertRow(rowNumber: number, count = 1): void {
     assertRowNumber(rowNumber);
     assertInsertCount(count);
@@ -277,6 +308,7 @@ export class Sheet {
       shiftFormulaReferences(formula, this.name, 0, 0, rowNumber, count, false),
     );
     this.workbook.rewriteDefinedNamesForSheetStructure(this.name, 0, 0, rowNumber, count, "shift");
+    this.updateTableReferences(0, 0, rowNumber, count, "shift");
   }
 
   insertColumn(column: number | string, count = 1): void {
@@ -321,6 +353,7 @@ export class Sheet {
       shiftFormulaReferences(formula, this.name, columnNumber, count, 0, 0, false),
     );
     this.workbook.rewriteDefinedNamesForSheetStructure(this.name, columnNumber, count, 0, 0, "shift");
+    this.updateTableReferences(columnNumber, count, 0, 0, "shift");
   }
 
   deleteRow(rowNumber: number, count = 1): void {
@@ -356,6 +389,7 @@ export class Sheet {
       deleteFormulaReferences(formula, this.name, 0, 0, rowNumber, count, false),
     );
     this.workbook.rewriteDefinedNamesForSheetStructure(this.name, 0, 0, rowNumber, count, "delete");
+    this.updateTableReferences(0, 0, rowNumber, count, "delete");
   }
 
   deleteColumn(column: number | string, count = 1): void {
@@ -392,6 +426,7 @@ export class Sheet {
       deleteFormulaReferences(formula, this.name, columnNumber, count, 0, 0, false),
     );
     this.workbook.rewriteDefinedNamesForSheetStructure(this.name, columnNumber, count, 0, 0, "delete");
+    this.updateTableReferences(columnNumber, count, 0, 0, "delete");
   }
 
   setCell(address: string, value: CellValue): void {
@@ -702,6 +737,86 @@ export class Sheet {
     });
 
     if (changed) {
+      this.writeSheetXml(nextSheetXml);
+    }
+  }
+
+  private getTableReferences(): TableReference[] {
+    const sheetRelationshipIds = Array.from(
+      this.getSheetIndex().xml.matchAll(/<tablePart\b[^>]*\br:id="([^"]+)"[^>]*\/>/g),
+      (match) => match[1],
+    );
+    if (sheetRelationshipIds.length === 0) {
+      return [];
+    }
+
+    const relationshipsPath = `${dirnamePosix(this.path)}/_rels/${basenamePosix(this.path)}.rels`;
+    if (!this.workbook.listEntries().includes(relationshipsPath)) {
+      return [];
+    }
+
+    const relationshipsXml = this.workbook.readEntryText(relationshipsPath);
+    const baseDir = dirnamePosix(this.path);
+    const tables: TableReference[] = [];
+
+    for (const match of relationshipsXml.matchAll(/<Relationship\b([^>]*?)\/>/g)) {
+      const attributesSource = match[1];
+      const relationshipId = getXmlAttr(attributesSource, "Id");
+      const type = getXmlAttr(attributesSource, "Type");
+      const target = getXmlAttr(attributesSource, "Target");
+
+      if (
+        !relationshipId ||
+        !type ||
+        !target ||
+        !sheetRelationshipIds.includes(relationshipId) ||
+        !/\/table$/.test(type)
+      ) {
+        continue;
+      }
+
+      tables.push({
+        relationshipId,
+        path: resolvePosix(baseDir, target.replace(/^\/+/, "")),
+      });
+    }
+
+    return tables;
+  }
+
+  private updateTableReferences(
+    targetColumnNumber: number,
+    columnCount: number,
+    targetRowNumber: number,
+    rowCount: number,
+    mode: "shift" | "delete",
+  ): void {
+    const transformRange = (range: string) =>
+      mode === "shift"
+        ? shiftRangeRef(range, targetColumnNumber, columnCount, targetRowNumber, rowCount)
+        : deleteRangeRef(range, targetColumnNumber, columnCount, targetRowNumber, rowCount);
+    const removedRelationshipIds: string[] = [];
+
+    for (const table of this.getTableReferences()) {
+      const tableXml = this.workbook.readEntryText(table.path);
+      const nextTableXml = rewriteTableReferenceXml(tableXml, transformRange);
+
+      if (nextTableXml === null) {
+        removedRelationshipIds.push(table.relationshipId);
+        continue;
+      }
+
+      if (nextTableXml !== tableXml) {
+        this.workbook.writeEntryText(table.path, nextTableXml);
+      }
+    }
+
+    if (removedRelationshipIds.length === 0) {
+      return;
+    }
+
+    const nextSheetXml = removeTablePartsFromSheetXml(this.getSheetIndex().xml, removedRelationshipIds);
+    if (nextSheetXml !== this.getSheetIndex().xml) {
       this.writeSheetXml(nextSheetXml);
     }
   }
@@ -2263,6 +2378,85 @@ function updateMergedRanges(sheetXml: string, ranges: string[]): string {
 
   const anchorIndex = insertionIndex + sheetDataCloseTag.length;
   return sheetXml.slice(0, anchorIndex) + mergeCellsXml + sheetXml.slice(anchorIndex);
+}
+
+function rewriteTableReferenceXml(
+  tableXml: string,
+  transformRange: (range: string) => string | null,
+): string | null {
+  const tableMatch = tableXml.match(/<table\b([^>]*?)>/);
+  if (!tableMatch) {
+    return tableXml;
+  }
+
+  const tableAttributes = parseAttributes(tableMatch[1]);
+  const refIndex = tableAttributes.findIndex(([name]) => name === "ref");
+  if (refIndex === -1) {
+    return tableXml;
+  }
+
+  const currentRange = tableAttributes[refIndex]?.[1] ?? "";
+  const nextRange = transformRange(currentRange);
+  if (nextRange === null) {
+    return null;
+  }
+
+  const nextTableAttributes = [...tableAttributes];
+  nextTableAttributes[refIndex] = ["ref", nextRange];
+  let nextTableXml =
+    tableXml.slice(0, tableMatch.index) +
+    `<table ${serializeAttributes(nextTableAttributes)}>` +
+    tableXml.slice((tableMatch.index ?? 0) + tableMatch[0].length);
+
+  nextTableXml = nextTableXml.replace(/<autoFilter\b([^>]*?)\/>/g, (match, attributesSource) => {
+    const attributes = parseAttributes(attributesSource);
+    const autoFilterRefIndex = attributes.findIndex(([name]) => name === "ref");
+
+    if (autoFilterRefIndex === -1) {
+      return match;
+    }
+
+    const autoFilterRange = attributes[autoFilterRefIndex]?.[1] ?? "";
+    const nextAutoFilterRange = transformRange(autoFilterRange);
+    if (nextAutoFilterRange === null) {
+      return "";
+    }
+
+    const nextAttributes = [...attributes];
+    nextAttributes[autoFilterRefIndex] = ["ref", nextAutoFilterRange];
+    return `<autoFilter ${serializeAttributes(nextAttributes)}/>`;
+  });
+
+  return nextTableXml;
+}
+
+function removeTablePartsFromSheetXml(sheetXml: string, relationshipIds: string[]): string {
+  const tablePartsMatch = sheetXml.match(/<tableParts\b[^>]*>([\s\S]*?)<\/tableParts>/);
+  if (!tablePartsMatch || tablePartsMatch.index === undefined) {
+    return sheetXml;
+  }
+
+  const keptTableParts = Array.from(
+    tablePartsMatch[1].matchAll(/<tablePart\b([^>]*?)\/>/g),
+    (match) => {
+      const attributesSource = match[1];
+      return {
+        relationshipId: getXmlAttr(attributesSource, "r:id"),
+        xml: `<tablePart${attributesSource ? ` ${attributesSource.trim()}` : ""}/>`,
+      };
+    },
+  ).filter((tablePart) => tablePart.relationshipId && !relationshipIds.includes(tablePart.relationshipId));
+
+  const nextTablePartsXml =
+    keptTableParts.length === 0
+      ? ""
+      : `<tableParts count="${keptTableParts.length}">${keptTableParts.map((tablePart) => tablePart.xml).join("")}</tableParts>`;
+
+  return (
+    sheetXml.slice(0, tablePartsMatch.index) +
+    nextTablePartsXml +
+    sheetXml.slice(tablePartsMatch.index + tablePartsMatch[0].length)
+  );
 }
 
 function compareRangeRefs(left: string, right: string): number {

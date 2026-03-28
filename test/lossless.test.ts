@@ -555,6 +555,103 @@ test("deleteRow updates worksheet ref attributes and defined names", async () =>
   assert.match(workbookXml, /<definedName name="DataRange">Sheet1!\$B\$2:\$C\$3<\/definedName>/);
 });
 
+test("sheet getTables reads existing tables and insertColumn updates table refs", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = withSheetTable(
+    replaceEntryText(
+      await loadFixtureEntries(fixtureDir),
+      "xl/worksheets/sheet1.xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData>
+    <row r="1">
+      <c r="A1"><v>1</v></c>
+      <c r="B1"><v>2</v></c>
+    </row>
+    <row r="2">
+      <c r="A2"><v>3</v></c>
+      <c r="B2"><v>4</v></c>
+    </row>
+    <row r="3">
+      <c r="A3"><v>5</v></c>
+      <c r="B3"><v>6</v></c>
+    </row>
+  </sheetData>
+  <tableParts count="1"><tablePart r:id="rIdTable1"/></tableParts>
+</worksheet>`,
+    ),
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="Sales" displayName="Sales" ref="A1:B3" totalsRowShown="0">
+  <autoFilter ref="A1:B3"/>
+  <tableColumns count="2">
+    <tableColumn id="1" name="A"/>
+    <tableColumn id="2" name="B"/>
+  </tableColumns>
+</table>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  assert.deepEqual(sheet.getTables(), [
+    { name: "Sales", displayName: "Sales", range: "A1:B3", path: "xl/tables/table1.xml" },
+  ]);
+
+  sheet.insertColumn("B");
+
+  assert.deepEqual(sheet.getTables(), [
+    { name: "Sales", displayName: "Sales", range: "A1:C3", path: "xl/tables/table1.xml" },
+  ]);
+
+  const tableXml = entryText(workbook.toEntries(), "xl/tables/table1.xml");
+  assert.match(tableXml, /<table [^>]*ref="A1:C3"[^>]*>/);
+  assert.match(tableXml, /<autoFilter ref="A1:C3"\/>/);
+});
+
+test("deleteRow removes table parts when the full table range is deleted", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = withSheetTable(
+    replaceEntryText(
+      await loadFixtureEntries(fixtureDir),
+      "xl/worksheets/sheet1.xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData>
+    <row r="1">
+      <c r="A1"><v>1</v></c>
+      <c r="B1"><v>2</v></c>
+    </row>
+    <row r="2">
+      <c r="A2"><v>3</v></c>
+      <c r="B2"><v>4</v></c>
+    </row>
+    <row r="3">
+      <c r="A3"><v>5</v></c>
+      <c r="B3"><v>6</v></c>
+    </row>
+  </sheetData>
+  <tableParts count="1"><tablePart r:id="rIdTable1"/></tableParts>
+</worksheet>`,
+    ),
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="Sales" displayName="Sales" ref="A1:B3" totalsRowShown="0">
+  <autoFilter ref="A1:B3"/>
+  <tableColumns count="2">
+    <tableColumn id="1" name="A"/>
+    <tableColumn id="2" name="B"/>
+  </tableColumns>
+</table>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.deleteRow(1, 3);
+
+  assert.deepEqual(sheet.getTables(), []);
+
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.doesNotMatch(sheetXml, /<tableParts\b/);
+});
+
 test("row APIs read sparse rows and write from a column offset", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = await loadFixtureEntries(fixtureDir);
@@ -1125,6 +1222,42 @@ function withSecondSheet(
     {
       path: "xl/worksheets/sheet2.xml",
       data: encoder.encode(sheetXml),
+    },
+  ].sort((left, right) => left.path.localeCompare(right.path));
+}
+
+function withSheetTable(
+  entries: Array<{ path: string; data: Uint8Array }>,
+  tableXml: string,
+): Array<{ path: string; data: Uint8Array }> {
+  const encoder = new TextEncoder();
+
+  return [
+    ...replaceEntryText(
+      entries,
+      "[Content_Types].xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/tables/table1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml"/>
+</Types>`,
+    ),
+    {
+      path: "xl/worksheets/_rels/sheet1.xml.rels",
+      data: encoder.encode(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdTable1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/>
+</Relationships>`),
+    },
+    {
+      path: "xl/tables/table1.xml",
+      data: encoder.encode(tableXml),
     },
   ].sort((left, right) => left.path.localeCompare(right.path));
 }

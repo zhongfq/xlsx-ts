@@ -66,6 +66,7 @@
 - `sheet.getRange(range)`
 - `sheet.getUsedRange()`
 - `sheet.getMergedRanges()`
+- `sheet.getTables()`
 - `sheet.setCell(address, value)`
 - `sheet.deleteRow(row, count?)`
 - `sheet.deleteColumn(column, count?)`
@@ -99,6 +100,7 @@ const detailSheet = workbook.addSheet("Detail");
 
 workbook.renameSheet("Sheet1", "Summary");
 detailSheet.rename("Detail 2026");
+console.log(sheet.getTables());
 sheet.setCell("A1", "Hello");
 sheet.deleteRow(8);
 sheet.deleteColumn("G");
@@ -147,6 +149,8 @@ await workbook.save("output.xlsx");
 - `deleteRow()` / `deleteColumn()` 当前会同步更新本 sheet 的单元格坐标、公式引用、合并区域、`dimension`、常见 `ref/sqref` 属性、`definedNames`，以及其它 sheet 里显式引用它的公式
 - `insertRow()` 当前会同步更新本 sheet 的单元格坐标、公式引用、合并区域、`dimension`、常见 `ref/sqref` 属性、`definedNames`，以及其它 sheet 里显式引用它的公式
 - `insertColumn()` 当前会同步更新本 sheet 的单元格坐标、公式引用、合并区域、`dimension`、常见 `ref/sqref` 属性、`definedNames`，以及其它 sheet 里显式引用它的公式
+- `sheet.getTables()` 当前可以读取已有 table 的名称、显示名、范围和部件路径
+- 已有关联 table 在插删行列时会同步维护它们自己的 `ref` / `autoFilter`；如果整块 table 被删空，会从当前 sheet 的 `tableParts` 里移除
 - `workbook.renameSheet()` / `sheet.rename()` 当前会同步维护 sheet 名、其它 sheet 的显式公式引用、`definedNames`、内部超链接位置和文档属性
 - `workbook.addSheet()` / `workbook.deleteSheet()` 当前会同步维护 `workbook.xml`、rels、`[Content_Types].xml`，并在删除 sheet 时修正剩余公式与 `definedNames`
 

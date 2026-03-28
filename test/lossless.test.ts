@@ -281,6 +281,59 @@ test("row style id APIs read and write row-level style indexes", async () => {
   assert.match(sheetXml, /<row r="3" s="7" customFormat="1">\s*<c r="A3"><v>3<\/v><\/c>\s*<\/row>/);
 });
 
+test("column style id APIs read, write, and shift with column edits", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cols>
+    <col min="1" max="2" style="1"/>
+    <col min="4" max="4" style="3" hidden="1"/>
+  </cols>
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="inlineStr"><is><t>Hello</t></is></c>
+      <c r="D1"><v>4</v></c>
+    </row>
+  </sheetData>
+</worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  assert.equal(sheet.getColumnStyleId("A"), 1);
+  assert.equal(sheet.getColumnStyleId(2), 1);
+  assert.equal(sheet.getColumnStyleId("C"), null);
+  assert.equal(sheet.getColumnStyleId("D"), 3);
+
+  sheet.setColumnStyleId("B", 5);
+  sheet.setColumnStyleId(3, 7);
+  sheet.setColumnStyleId("D", null);
+
+  assert.equal(sheet.getColumnStyleId("A"), 1);
+  assert.equal(sheet.getColumnStyleId("B"), 5);
+  assert.equal(sheet.getColumnStyleId("C"), 7);
+  assert.equal(sheet.getColumnStyleId("D"), null);
+
+  sheet.insertColumn("C");
+
+  assert.equal(sheet.getColumnStyleId("B"), 5);
+  assert.equal(sheet.getColumnStyleId("C"), null);
+  assert.equal(sheet.getColumnStyleId("D"), 7);
+  assert.equal(sheet.getColumnStyleId("E"), null);
+
+  sheet.deleteColumn("B");
+
+  assert.equal(sheet.getColumnStyleId("A"), 1);
+  assert.equal(sheet.getColumnStyleId("B"), null);
+  assert.equal(sheet.getColumnStyleId("C"), 7);
+
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.match(sheetXml, /<cols><col min="1" max="1" style="1"\/><col min="3" max="3" style="7"\/><col min="4" max="4" hidden="1"\/><\/cols>/);
+});
+
 test("range APIs read and write rectangular values", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = await loadFixtureEntries(fixtureDir);

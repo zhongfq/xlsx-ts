@@ -79,6 +79,7 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `sheet.getStyleId(address)`
 - `sheet.getStyleId(rowNumber, column)`
 - `sheet.getRowStyleId(rowNumber)`
+- `sheet.getColumnStyleId(column)`
 - `sheet.copyStyle(sourceAddress, targetAddress)`
 - `sheet.copyStyle(sourceRowNumber, sourceColumn, targetRowNumber, targetColumn)`
 - `sheet.getCellEntries()`
@@ -117,6 +118,7 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `sheet.setStyleId(address, styleId)`
 - `sheet.setStyleId(rowNumber, column, styleId)`
 - `sheet.setRowStyleId(rowNumber, styleId)`
+- `sheet.setColumnStyleId(column, styleId)`
 - `sheet.copyStyle(sourceAddress, targetAddress)`
 - `sheet.copyStyle(sourceRowNumber, sourceColumn, targetRowNumber, targetColumn)`
 - `sheet.deleteCell(address)`
@@ -154,6 +156,7 @@ const scoreCell = sheet.cell("B2");
 const scoreValue = sheet.getCell(2, 2);
 const scoreStyleId = sheet.getStyleId(2, 2);
 const headerRowStyleId = sheet.getRowStyleId(1);
+const scoreColumnStyleId = sheet.getColumnStyleId(2);
 const detailSheet = workbook.addSheet("Detail");
 const activeSheet = workbook.getActiveSheet();
 
@@ -178,6 +181,7 @@ sheet.setDataValidation("B2:B100", { type: "whole", operator: "between", formula
 sheet.setCell(3, 2, 98);
 sheet.setStyleId(3, 2, scoreStyleId);
 sheet.setRowStyleId(1, headerRowStyleId);
+sheet.setColumnStyleId(2, scoreColumnStyleId);
 sheet.copyStyle("B2", "C2");
 sheet.setCell("A1", "Hello");
 sheet.deleteRow(8);
@@ -237,6 +241,7 @@ Notes:
 - `sheet.deleteCell()` removes the worksheet `<c>` node entirely; if you want to keep a styled placeholder but clear the value, continue using `setCell(..., null)`.
 - `sheet.getStyleId()` and `setStyleId()` currently read and write the cell-level `s="..."` style index; both `A1` and `(rowNumber, column)` calls are supported, but `styles.xml` is not edited directly yet.
 - `sheet.getRowStyleId()` and `setRowStyleId()` currently read and write the row-level `<row s="..." customFormat="1">` style index; `styles.xml` is still left untouched.
+- `sheet.getColumnStyleId()` and `setColumnStyleId()` currently read and write the column-level `<cols><col ... style="..."/>` style index, and those ranges are shifted during column insert/delete operations.
 - `sheet.copyStyle()` currently copies the source cell's `styleId` onto the target cell without changing the target cell's value or formula; both address and `(rowNumber, column)` calls are supported.
 - `sheet.getFreezePane()`, `freezePane()`, and `unfreezePane()` currently manage worksheet `sheetViews/sheetView/pane`; `topLeftCell` keeps tracking row and column insert/delete operations.
 - `sheet.getSelection()` and `setSelection()` currently read and write worksheet `sheetViews/sheetView/selection`; when a frozen pane exists, they target the selection for the current active pane.

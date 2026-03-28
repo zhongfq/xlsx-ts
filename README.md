@@ -74,6 +74,7 @@
 - `sheet.getStyleId(address)`
 - `sheet.getStyleId(rowNumber, column)`
 - `sheet.getRowStyleId(rowNumber)`
+- `sheet.getColumnStyleId(column)`
 - `sheet.copyStyle(sourceAddress, targetAddress)`
 - `sheet.copyStyle(sourceRowNumber, sourceColumn, targetRowNumber, targetColumn)`
 - `sheet.getCellEntries()`
@@ -112,6 +113,7 @@
 - `sheet.setStyleId(address, styleId)`
 - `sheet.setStyleId(rowNumber, column, styleId)`
 - `sheet.setRowStyleId(rowNumber, styleId)`
+- `sheet.setColumnStyleId(column, styleId)`
 - `sheet.copyStyle(sourceAddress, targetAddress)`
 - `sheet.copyStyle(sourceRowNumber, sourceColumn, targetRowNumber, targetColumn)`
 - `sheet.deleteCell(address)`
@@ -149,6 +151,7 @@ const scoreCell = sheet.cell("B2");
 const scoreValue = sheet.getCell(2, 2);
 const scoreStyleId = sheet.getStyleId(2, 2);
 const headerRowStyleId = sheet.getRowStyleId(1);
+const scoreColumnStyleId = sheet.getColumnStyleId(2);
 const detailSheet = workbook.addSheet("Detail");
 const activeSheet = workbook.getActiveSheet();
 
@@ -173,6 +176,7 @@ sheet.setDataValidation("B2:B100", { type: "whole", operator: "between", formula
 sheet.setCell(3, 2, 98);
 sheet.setStyleId(3, 2, scoreStyleId);
 sheet.setRowStyleId(1, headerRowStyleId);
+sheet.setColumnStyleId(2, scoreColumnStyleId);
 sheet.copyStyle("B2", "C2");
 sheet.setCell("A1", "Hello");
 sheet.deleteRow(8);
@@ -232,6 +236,7 @@ await workbook.save("output.xlsx");
 - `sheet.deleteCell()` 会真正移除 worksheet 里的 `<c>` 节点；如果你只是想保留样式占位但把值清空，继续用 `setCell(..., null)`
 - `sheet.getStyleId()` / `setStyleId()` 当前读写单元格上的 `s="..."` 样式索引；支持 `A1` 和 `(rowNumber, column)` 两种调用，但还不直接编辑 `styles.xml`
 - `sheet.getRowStyleId()` / `setRowStyleId()` 当前读写 `<row s="..." customFormat="1">` 这一层的行级样式索引；同样不会直接编辑 `styles.xml`
+- `sheet.getColumnStyleId()` / `setColumnStyleId()` 当前读写 `<cols><col ... style="..."/>` 这一层的列级样式索引；插删列时这些范围也会一起跟着移动
 - `sheet.copyStyle()` 当前会把源单元格的 `styleId` 复制到目标单元格，不会改动目标单元格的值或公式；同样支持地址和 `(rowNumber, column)` 两种调用
 - `sheet.getFreezePane()` / `freezePane()` / `unfreezePane()` 当前维护 worksheet `sheetViews/sheetView/pane`；插删行列时 `topLeftCell` 也会继续跟随更新
 - `sheet.getSelection()` / `setSelection()` 当前读写 worksheet `sheetViews/sheetView/selection`；冻结窗格存在时会优先落在当前 active pane 对应的 selection 上

@@ -36,6 +36,13 @@ export interface Hyperlink {
   type: "external" | "internal";
 }
 
+export interface FreezePane {
+  columnCount: number;
+  rowCount: number;
+  topLeftCell: string;
+  activePane: "bottomLeft" | "topRight" | "bottomRight" | null;
+}
+
 export interface DataValidation {
   range: string;
   type: string | null;

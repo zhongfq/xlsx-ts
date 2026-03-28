@@ -91,6 +91,7 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `sheet.getUsedRange()`
 - `sheet.getMergedRanges()`
 - `sheet.getAutoFilter()`
+- `sheet.getFreezePane()`
 - `sheet.getDataValidations()`
 - `sheet.getTables()`
 - `sheet.getHyperlinks()`
@@ -99,6 +100,8 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `sheet.setHyperlink(address, target, options?)`
 - `sheet.removeHyperlink(address)`
 - `sheet.setAutoFilter(range)`
+- `sheet.freezePane(columnCount, rowCount?)`
+- `sheet.unfreezePane()`
 - `sheet.removeAutoFilter()`
 - `sheet.setDataValidation(range, options?)`
 - `sheet.removeDataValidation(range)`
@@ -150,10 +153,12 @@ detailSheet.rename("Detail 2026");
 console.log(sheet.getTables());
 console.log(sheet.getHyperlinks());
 console.log(sheet.rowCount, sheet.columnCount);
+console.log(sheet.getFreezePane(), activeSheet.name);
 sheet.addTable("A1:B10", { name: "Scores" });
 sheet.setHyperlink("A1", "https://example.com", { text: "Hello", tooltip: "Open link" });
 sheet.setHyperlink("B2", "#Summary!A1");
 sheet.setAutoFilter("A1:F20");
+sheet.freezePane(1, 1);
 sheet.setDataValidation("B2:B100", { type: "whole", operator: "between", formula1: "0", formula2: "100" });
 sheet.setCell(3, 2, 98);
 sheet.setCell("A1", "Hello");
@@ -189,6 +194,7 @@ sheet.addMergedRange("D1:E1");
 sheet.setFormula("B1", "SUM(1,2)", { cachedValue: 3 });
 sheet.setFormula(4, 3, "SUM(A4:B4)", { cachedValue: 12 });
 sheet.removeHyperlink("B2");
+sheet.unfreezePane();
 sheet.removeAutoFilter();
 sheet.removeDataValidation("B2:B100");
 sheet.removeTable("Scores");
@@ -211,6 +217,7 @@ Notes:
 - `sheet.rowCount` and `sheet.columnCount` currently mean the maximum used row number and maximum used column number. Empty sheets return `0`.
 - `sheet.getCellEntries()`, `iterCellEntries()`, `getRowEntries()`, and `getColumnEntries()` expose the real worksheet `<c>` nodes with address, row/column indexes, type, style id, and value, which is useful for large or sparse sheet iteration.
 - `sheet.deleteCell()` removes the worksheet `<c>` node entirely; if you want to keep a styled placeholder but clear the value, continue using `setCell(..., null)`.
+- `sheet.getFreezePane()`, `freezePane()`, and `unfreezePane()` currently manage worksheet `sheetViews/sheetView/pane`; `topLeftCell` keeps tracking row and column insert/delete operations.
 - After each write, the sheet index is rebuilt so later reads always see the latest content.
 - Worksheet edits keep `<dimension ref="...">` in sync so used-range metadata does not go stale.
 - `deleteRow()` and `deleteColumn()` currently update cell coordinates, formulas, merged ranges, worksheet `dimension`, common `ref` and `sqref` attributes, `definedNames`, and explicit formulas in other sheets that reference the edited sheet.

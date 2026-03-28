@@ -9,6 +9,7 @@ export type {
   CellValue,
   DataValidation,
   DefinedName,
+  FreezePane,
   Hyperlink,
   SetDataValidationOptions,
   SetDefinedNameOptions,

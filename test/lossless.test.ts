@@ -1353,6 +1353,58 @@ test("workbook active sheet APIs read and write workbookView activeTab", async (
   assert.match(workbookXml, /<bookViews><workbookView activeTab="1"\/><\/bookViews>\s*<sheets>/);
 });
 
+test("sheet freeze pane APIs read, write, shift, and remove pane state", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetViews><sheetView workbookViewId="0"><pane xSplit="1" ySplit="1" topLeftCell="B2" activePane="bottomRight" state="frozen"/><selection pane="bottomRight" activeCell="B2" sqref="B2"/></sheetView></sheetViews>
+  <sheetData>
+    <row r="1"><c r="A1"><v>1</v></c></row>
+  </sheetData>
+</worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  assert.deepEqual(sheet.getFreezePane(), {
+    columnCount: 1,
+    rowCount: 1,
+    topLeftCell: "B2",
+    activePane: "bottomRight",
+  });
+
+  sheet.insertColumn("A");
+  assert.deepEqual(sheet.getFreezePane(), {
+    columnCount: 1,
+    rowCount: 1,
+    topLeftCell: "C2",
+    activePane: "bottomRight",
+  });
+
+  sheet.freezePane(2, 1);
+  let sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.match(sheetXml, /<pane state="frozen" xSplit="2" ySplit="1" topLeftCell="C2" activePane="bottomRight"\/>/);
+  assert.match(sheetXml, /<selection pane="topRight"\/><selection pane="bottomLeft"\/><selection pane="bottomRight" activeCell="C2" sqref="C2"\/>/);
+
+  sheet.unfreezePane();
+  assert.equal(sheet.getFreezePane(), null);
+
+  sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.doesNotMatch(sheetXml, /<pane\b/);
+  assert.match(sheetXml, /<selection activeCell="C2" sqref="C2"\/>/);
+
+  sheet.freezePane(0, 2);
+  assert.deepEqual(sheet.getFreezePane(), {
+    columnCount: 0,
+    rowCount: 2,
+    topLeftCell: "A3",
+    activePane: "bottomLeft",
+  });
+});
+
 test("workbook sheet visibility APIs read and write hidden states", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = replaceEntryText(

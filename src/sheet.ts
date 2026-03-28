@@ -4,6 +4,7 @@ import type {
   CellSnapshot,
   CellValue,
   DataValidation,
+  FreezePane,
   Hyperlink,
   SetDataValidationOptions,
   SetFormulaOptions,
@@ -294,6 +295,10 @@ export class Sheet {
     return parseSheetAutoFilter(this.getSheetIndex().xml);
   }
 
+  getFreezePane(): FreezePane | null {
+    return parseSheetFreezePane(this.getSheetIndex().xml);
+  }
+
   getDataValidations(): DataValidation[] {
     return parseSheetDataValidations(this.getSheetIndex().xml);
   }
@@ -396,6 +401,23 @@ export class Sheet {
 
   removeAutoFilter(): void {
     const nextSheetXml = removeAutoFilterFromSheetXml(this.getSheetIndex().xml);
+
+    if (nextSheetXml !== this.getSheetIndex().xml) {
+      this.writeSheetXml(nextSheetXml);
+    }
+  }
+
+  freezePane(columnCount: number, rowCount = 0): void {
+    assertFreezeSplit(columnCount, rowCount);
+    const nextSheetXml = upsertFreezePaneInSheetXml(this.getSheetIndex().xml, columnCount, rowCount);
+
+    if (nextSheetXml !== this.getSheetIndex().xml) {
+      this.writeSheetXml(nextSheetXml);
+    }
+  }
+
+  unfreezePane(): void {
+    const nextSheetXml = removeFreezePaneFromSheetXml(this.getSheetIndex().xml);
 
     if (nextSheetXml !== this.getSheetIndex().xml) {
       this.writeSheetXml(nextSheetXml);
@@ -2661,6 +2683,127 @@ function parseSheetAutoFilter(sheetXml: string): string | null {
   return ref ? normalizeRangeRef(ref) : null;
 }
 
+function parseSheetFreezePane(sheetXml: string): FreezePane | null {
+  const paneMatch = sheetXml.match(/<pane\b([^>]*?)\/>/);
+  if (!paneMatch) {
+    return null;
+  }
+
+  const attributesSource = paneMatch[1];
+  const state = getXmlAttr(attributesSource, "state");
+  if (state && state !== "frozen" && state !== "frozenSplit") {
+    return null;
+  }
+
+  const columnCount = Number(getXmlAttr(attributesSource, "xSplit") ?? "0");
+  const rowCount = Number(getXmlAttr(attributesSource, "ySplit") ?? "0");
+  if ((!Number.isFinite(columnCount) || columnCount < 0) && (!Number.isFinite(rowCount) || rowCount < 0)) {
+    return null;
+  }
+
+  if (columnCount === 0 && rowCount === 0) {
+    return null;
+  }
+
+  return {
+    columnCount: Number.isFinite(columnCount) ? columnCount : 0,
+    rowCount: Number.isFinite(rowCount) ? rowCount : 0,
+    topLeftCell: getXmlAttr(attributesSource, "topLeftCell") ?? makeCellAddress(rowCount + 1, columnCount + 1),
+    activePane: normalizePaneName(getXmlAttr(attributesSource, "activePane")),
+  };
+}
+
+function upsertFreezePaneInSheetXml(sheetXml: string, columnCount: number, rowCount: number): string {
+  const paneXml = buildFreezePaneXml(columnCount, rowCount);
+  const selectionsXml = buildFreezePaneSelectionsXml(columnCount, rowCount);
+  const sheetViewsMatch = sheetXml.match(/<sheetViews\b[^>]*>([\s\S]*?)<\/sheetViews>/);
+
+  if (!sheetViewsMatch || sheetViewsMatch.index === undefined) {
+    const insertionIndex = findWorksheetChildInsertionIndex(sheetXml, SHEET_VIEWS_FOLLOWING_TAGS);
+    return (
+      sheetXml.slice(0, insertionIndex) +
+      `<sheetViews><sheetView workbookViewId="0">${paneXml}${selectionsXml}</sheetView></sheetViews>` +
+      sheetXml.slice(insertionIndex)
+    );
+  }
+
+  const sheetViewMatch = sheetViewsMatch[1].match(/<sheetView\b([^>]*?)(?:\/>|>([\s\S]*?)<\/sheetView>)/);
+  if (!sheetViewMatch || sheetViewMatch.index === undefined) {
+    return (
+      sheetXml.slice(0, sheetViewsMatch.index) +
+      `<sheetViews><sheetView workbookViewId="0">${paneXml}${selectionsXml}</sheetView></sheetViews>` +
+      sheetXml.slice(sheetViewsMatch.index + sheetViewsMatch[0].length)
+    );
+  }
+
+  const attributes = parseAttributes(sheetViewMatch[1]);
+  if (!attributes.some(([name]) => name === "workbookViewId")) {
+    attributes.push(["workbookViewId", "0"]);
+  }
+
+  const innerXml = sheetViewMatch[2] ?? "";
+  const cleanedInnerXml = innerXml
+    .replace(/<pane\b[^>]*\/>/g, "")
+    .replace(/<selection\b[^>]*\/>/g, "");
+  const nextSheetViewXml = `<sheetView ${serializeAttributes(attributes)}>${paneXml}${selectionsXml}${cleanedInnerXml}</sheetView>`;
+  const relativeStart = sheetViewMatch.index;
+  const absoluteStart = sheetViewsMatch.index + sheetViewsMatch[0].indexOf(sheetViewMatch[0], relativeStart);
+
+  return (
+    sheetXml.slice(0, absoluteStart) +
+    nextSheetViewXml +
+    sheetXml.slice(absoluteStart + sheetViewMatch[0].length)
+  );
+}
+
+function removeFreezePaneFromSheetXml(sheetXml: string): string {
+  const sheetViewsMatch = sheetXml.match(/<sheetViews\b[^>]*>([\s\S]*?)<\/sheetViews>/);
+  if (!sheetViewsMatch || sheetViewsMatch.index === undefined) {
+    return sheetXml;
+  }
+
+  const sheetViewMatch = sheetViewsMatch[1].match(/<sheetView\b([^>]*?)(?:\/>|>([\s\S]*?)<\/sheetView>)/);
+  if (!sheetViewMatch || sheetViewMatch.index === undefined) {
+    return sheetXml;
+  }
+
+  const attributes = parseAttributes(sheetViewMatch[1]);
+  if (!attributes.some(([name]) => name === "workbookViewId")) {
+    attributes.push(["workbookViewId", "0"]);
+  }
+
+  const innerXml = sheetViewMatch[2] ?? "";
+  const paneMatch = innerXml.match(/<pane\b([^>]*?)\/>/);
+  if (!paneMatch) {
+    return sheetXml;
+  }
+
+  const activePane = normalizePaneName(getXmlAttr(paneMatch[1], "activePane"));
+  const selections = Array.from(innerXml.matchAll(/<selection\b([^>]*?)\/>/g), (match) => ({
+    xml: match[0],
+    attributes: parseAttributes(match[1]),
+  }));
+  const preferredSelection =
+    selections.find((selection) => selection.attributes.find(([name]) => name === "pane")?.[1] === activePane) ??
+    selections.find((selection) => selection.attributes.some(([name]) => name === "activeCell" || name === "sqref")) ??
+    selections[0];
+  const nextSelectionXml = preferredSelection
+    ? buildSelectionXml(preferredSelection.attributes.filter(([name]) => name !== "pane"))
+    : "";
+  const cleanedInnerXml = innerXml
+    .replace(/<pane\b[^>]*\/>/g, "")
+    .replace(/<selection\b[^>]*\/>/g, "");
+  const nextSheetViewXml = `<sheetView ${serializeAttributes(attributes)}>${nextSelectionXml}${cleanedInnerXml}</sheetView>`;
+  const relativeStart = sheetViewMatch.index;
+  const absoluteStart = sheetViewsMatch.index + sheetViewsMatch[0].indexOf(sheetViewMatch[0], relativeStart);
+
+  return (
+    sheetXml.slice(0, absoluteStart) +
+    nextSheetViewXml +
+    sheetXml.slice(absoluteStart + sheetViewMatch[0].length)
+  );
+}
+
 function upsertAutoFilterInSheetXml(sheetXml: string, range: string): string {
   const normalizedRange = normalizeRangeRef(range);
   const autoFilterXml = `<autoFilter ref="${normalizedRange}"/>`;
@@ -3239,6 +3382,74 @@ function appendOptionalBooleanAttribute(attributes: Array<[string, string]>, nam
   }
 }
 
+function buildFreezePaneXml(columnCount: number, rowCount: number): string {
+  const attributes: Array<[string, string]> = [["state", "frozen"]];
+  if (columnCount > 0) {
+    attributes.push(["xSplit", String(columnCount)]);
+  }
+  if (rowCount > 0) {
+    attributes.push(["ySplit", String(rowCount)]);
+  }
+  attributes.push(["topLeftCell", makeCellAddress(rowCount + 1, columnCount + 1)]);
+  const activePane = getFreezePaneActivePane(columnCount, rowCount);
+  if (activePane) {
+    attributes.push(["activePane", activePane]);
+  }
+
+  return `<pane ${serializeAttributes(attributes)}/>`;
+}
+
+function buildFreezePaneSelectionsXml(columnCount: number, rowCount: number): string {
+  const topLeftCell = makeCellAddress(rowCount + 1, columnCount + 1);
+
+  if (columnCount > 0 && rowCount > 0) {
+    return [
+      buildSelectionXml([["pane", "topRight"]]),
+      buildSelectionXml([["pane", "bottomLeft"]]),
+      buildSelectionXml([["pane", "bottomRight"], ["activeCell", topLeftCell], ["sqref", topLeftCell]]),
+    ].join("");
+  }
+
+  if (columnCount > 0) {
+    return buildSelectionXml([["pane", "topRight"], ["activeCell", topLeftCell], ["sqref", topLeftCell]]);
+  }
+
+  return buildSelectionXml([["pane", "bottomLeft"], ["activeCell", topLeftCell], ["sqref", topLeftCell]]);
+}
+
+function buildSelectionXml(attributes: Array<[string, string]>): string {
+  return attributes.length === 0 ? "<selection/>" : `<selection ${serializeAttributes(attributes)}/>`;
+}
+
+function getFreezePaneActivePane(
+  columnCount: number,
+  rowCount: number,
+): "bottomLeft" | "topRight" | "bottomRight" | null {
+  if (columnCount > 0 && rowCount > 0) {
+    return "bottomRight";
+  }
+
+  if (columnCount > 0) {
+    return "topRight";
+  }
+
+  if (rowCount > 0) {
+    return "bottomLeft";
+  }
+
+  return null;
+}
+
+function normalizePaneName(
+  value: string | undefined,
+): "bottomLeft" | "topRight" | "bottomRight" | null {
+  if (value === "bottomLeft" || value === "topRight" || value === "bottomRight") {
+    return value;
+  }
+
+  return null;
+}
+
 function parseOptionalXmlBoolean(value: string | undefined): boolean | null {
   if (value === undefined) {
     return null;
@@ -3270,6 +3481,20 @@ function removeContentTypeOverride(contentTypesXml: string, partPath: string): s
     new RegExp(`<Override\\b[^>]*\\bPartName="/${escapeRegex(partPath)}"[^>]*/>`),
     "",
   );
+}
+
+function assertFreezeSplit(columnCount: number, rowCount: number): void {
+  if (!Number.isInteger(columnCount) || columnCount < 0) {
+    throw new XlsxError(`Invalid freeze column count: ${columnCount}`);
+  }
+
+  if (!Number.isInteger(rowCount) || rowCount < 0) {
+    throw new XlsxError(`Invalid freeze row count: ${rowCount}`);
+  }
+
+  if (columnCount === 0 && rowCount === 0) {
+    throw new XlsxError("Freeze pane requires at least one frozen row or column");
+  }
 }
 
 function compareRangeRefs(left: string, right: string): number {
@@ -3368,6 +3593,37 @@ const HYPERLINK_RELATIONSHIP_TYPE =
 const ROW_CLOSE_TAG = "</row>";
 const CELL_CLOSE_TAG = "</c>";
 const AUTO_FILTER_FOLLOWING_TAGS = [
+  "sortState",
+  "mergeCells",
+  "phoneticPr",
+  "conditionalFormatting",
+  "dataValidations",
+  "hyperlinks",
+  "printOptions",
+  "pageMargins",
+  "pageSetup",
+  "headerFooter",
+  "rowBreaks",
+  "colBreaks",
+  "customProperties",
+  "cellWatches",
+  "ignoredErrors",
+  "smartTags",
+  "drawing",
+  "legacyDrawing",
+  "legacyDrawingHF",
+  "picture",
+  "oleObjects",
+  "controls",
+  "webPublishItems",
+  "tableParts",
+  "extLst",
+];
+const SHEET_VIEWS_FOLLOWING_TAGS = [
+  "sheetFormatPr",
+  "cols",
+  "sheetData",
+  "autoFilter",
   "sortState",
   "mergeCells",
   "phoneticPr",

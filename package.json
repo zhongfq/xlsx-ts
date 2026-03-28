@@ -20,6 +20,7 @@
     "build": "tsc -p tsconfig.json",
     "test": "node --import tsx --test test/**/*.test.ts",
     "bench:monster": "node --import tsx scripts/benchmark.ts res/monster.xlsx",
+    "bench:check": "node --import tsx scripts/benchmark.ts res/monster.xlsx 5 --check benchmarks/monster-baseline.json",
     "bench:compare": "node --import tsx test/compare-test.ts",
     "validate:roundtrip": "node --import tsx scripts/validate-roundtrip.ts",
     "validate:task": "npm run validate:roundtrip -- res/task.xlsx"

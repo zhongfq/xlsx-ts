@@ -223,10 +223,14 @@ Common commands:
 
 - `npm run bench:monster`
   - Run a 3-iteration comparison on `res/monster.xlsx` against `xlsx-ts` and `xlsx dense`
+- `npm run bench:check`
+  - Run a 5-iteration comparison on `res/monster.xlsx` and validate correctness plus performance thresholds from `benchmarks/monster-baseline.json`
 - `npm run bench:compare`
   - Equivalent wrapper around the compare script kept in the repo
 - `node --import tsx scripts/benchmark.ts res/monster.xlsx 5`
   - Run the benchmark with a custom file path and iteration count
+- `node --import tsx scripts/benchmark.ts res/monster.xlsx 5 --check benchmarks/monster-baseline.json`
+  - Run the regression check against any benchmark file; the process exits non-zero when the thresholds are exceeded
 
 ## Current Limits
 

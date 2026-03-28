@@ -218,10 +218,14 @@ await workbook.save("output.xlsx");
 
 - `npm run bench:monster`
   - 对 `res/monster.xlsx` 运行 3 轮对比基准，比较 `xlsx-ts` 和 `xlsx dense`
+- `npm run bench:check`
+  - 对 `res/monster.xlsx` 运行 5 轮对比，并校验 `benchmarks/monster-baseline.json` 里的正确性与性能阈值
 - `npm run bench:compare`
   - 等价于运行仓库里的对比脚本
 - `node --import tsx scripts/benchmark.ts res/monster.xlsx 5`
   - 自定义文件路径和迭代次数
+- `node --import tsx scripts/benchmark.ts res/monster.xlsx 5 --check benchmarks/monster-baseline.json`
+  - 对任意基准文件执行回归检查；超出阈值时进程会以非零状态退出
 
  ## 当前限制
 

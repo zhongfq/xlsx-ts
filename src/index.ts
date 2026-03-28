@@ -3,6 +3,12 @@ export { Sheet } from "./sheet.js";
 export { Workbook } from "./workbook.js";
 export type {
   ArchiveEntry,
+  CellBorderColor,
+  CellBorderColorPatch,
+  CellBorderDefinition,
+  CellBorderPatch,
+  CellBorderSideDefinition,
+  CellBorderSidePatch,
   CellEntry,
   CellFillColor,
   CellFillColorPatch,

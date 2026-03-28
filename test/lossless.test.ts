@@ -550,6 +550,154 @@ test("cell fill APIs clone and apply fills without mutating shared fill ids", as
   assert.match(sheetXml, /<c r="B1" s="3" t="inlineStr"><is><t>World<\/t><\/is><\/c>/);
 });
 
+test("border definition APIs read, clone, and update workbook borders", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = await loadFixtureEntries(fixtureDir);
+  const workbook = Workbook.fromEntries(entries);
+
+  assert.deepEqual(workbook.getBorder(0), {
+    left: { style: null, color: null },
+    right: { style: null, color: null },
+    top: { style: null, color: null },
+    bottom: { style: null, color: null },
+    diagonal: { style: null, color: null },
+    vertical: null,
+    horizontal: null,
+    diagonalUp: null,
+    diagonalDown: null,
+    outline: null,
+  });
+
+  const nextBorderId = workbook.cloneBorder(0, {
+    bottom: {
+      style: "double",
+      color: {
+        rgb: "FF00FF00",
+      },
+    },
+  });
+  workbook.updateBorder(0, {
+    top: {
+      style: "thin",
+      color: {
+        rgb: "FFFF0000",
+      },
+    },
+  });
+
+  assert.equal(nextBorderId, 1);
+  assert.deepEqual(workbook.getBorder(0), {
+    left: { style: null, color: null },
+    right: { style: null, color: null },
+    top: { style: "thin", color: { rgb: "FFFF0000" } },
+    bottom: { style: null, color: null },
+    diagonal: { style: null, color: null },
+    vertical: null,
+    horizontal: null,
+    diagonalUp: null,
+    diagonalDown: null,
+    outline: null,
+  });
+  assert.deepEqual(workbook.getBorder(1), {
+    left: { style: null, color: null },
+    right: { style: null, color: null },
+    top: { style: null, color: null },
+    bottom: { style: "double", color: { rgb: "FF00FF00" } },
+    diagonal: { style: null, color: null },
+    vertical: null,
+    horizontal: null,
+    diagonalUp: null,
+    diagonalDown: null,
+    outline: null,
+  });
+
+  const stylesXml = entryText(workbook.toEntries(), "xl/styles.xml");
+  assert.match(stylesXml, /<borders count="2">/);
+  assert.match(
+    stylesXml,
+    /<border><left\/><right\/><top style="thin"><color rgb="FFFF0000"\/><\/top><bottom\/><diagonal\/><\/border>/,
+  );
+  assert.match(
+    stylesXml,
+    /<border><left\/><right\/><top\/><bottom style="double"><color rgb="FF00FF00"\/><\/bottom><diagonal\/><\/border>/,
+  );
+});
+
+test("cell border APIs clone and apply borders without mutating shared border ids", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" s="1" t="inlineStr"><is><t>Hello</t></is></c>
+      <c r="B1" s="1" t="inlineStr"><is><t>World</t></is></c>
+    </row>
+  </sheetData>
+</worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+  const cell = sheet.cell("B1");
+
+  assert.equal(sheet.getBorder("A1")?.top?.style, null);
+  assert.equal(cell.border?.bottom?.style, null);
+
+  const a1BorderId = sheet.setBorder("A1", {
+    top: {
+      style: "thin",
+      color: {
+        rgb: "FFFF0000",
+      },
+    },
+  });
+  const b1BorderId = cell.setBorder({
+    bottom: {
+      style: "double",
+      color: {
+        rgb: "FF00FF00",
+      },
+    },
+  });
+
+  assert.equal(a1BorderId, 1);
+  assert.equal(b1BorderId, 2);
+  assert.equal(workbook.getBorder(0)?.top?.style, null);
+  assert.equal(workbook.getBorder(0)?.bottom?.style, null);
+  assert.deepEqual(sheet.getBorder("A1"), {
+    left: { style: null, color: null },
+    right: { style: null, color: null },
+    top: { style: "thin", color: { rgb: "FFFF0000" } },
+    bottom: { style: null, color: null },
+    diagonal: { style: null, color: null },
+    vertical: null,
+    horizontal: null,
+    diagonalUp: null,
+    diagonalDown: null,
+    outline: null,
+  });
+  assert.deepEqual(cell.border, {
+    left: { style: null, color: null },
+    right: { style: null, color: null },
+    top: { style: null, color: null },
+    bottom: { style: "double", color: { rgb: "FF00FF00" } },
+    diagonal: { style: null, color: null },
+    vertical: null,
+    horizontal: null,
+    diagonalUp: null,
+    diagonalDown: null,
+    outline: null,
+  });
+
+  const stylesXml = entryText(workbook.toEntries(), "xl/styles.xml");
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.match(stylesXml, /<borders count="3">/);
+  assert.match(sheetXml, /<c r="A1" s="2" t="inlineStr"><is><t>Hello<\/t><\/is><\/c>/);
+  assert.match(sheetXml, /<c r="B1" s="3" t="inlineStr"><is><t>World<\/t><\/is><\/c>/);
+});
+
 test("copyStyle APIs copy style indexes without changing target values", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = replaceEntryText(

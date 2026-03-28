@@ -1,5 +1,7 @@
 import { Cell } from "./cell.js";
 import type {
+  CellBorderDefinition,
+  CellBorderPatch,
   CellEntry,
   CellFillDefinition,
   CellFillPatch,
@@ -144,6 +146,16 @@ export class Sheet {
     return style ? this.workbook.getFill(style.fillId) : null;
   }
 
+  getBorder(address: string): CellBorderDefinition | null;
+  getBorder(rowNumber: number, column: number | string): CellBorderDefinition | null;
+  getBorder(addressOrRowNumber: string | number, column?: number | string): CellBorderDefinition | null {
+    const style =
+      typeof addressOrRowNumber === "number"
+        ? this.getStyle(addressOrRowNumber, column!)
+        : this.getStyle(addressOrRowNumber);
+    return style ? this.workbook.getBorder(style.borderId) : null;
+  }
+
   getColumnStyleId(column: number | string): number | null {
     const columnNumber = normalizeColumnNumber(column);
     return parseColumnStyleId(this.getSheetIndex().xml, columnNumber);
@@ -242,6 +254,33 @@ export class Sheet {
     });
     this.setStyleId(normalizedAddress, nextStyleId);
     return nextFillId;
+  }
+
+  setBorder(address: string, patch: CellBorderPatch): number;
+  setBorder(rowNumber: number, column: number | string, patch: CellBorderPatch): number;
+  setBorder(
+    addressOrRowNumber: string | number,
+    columnOrPatch: number | string | CellBorderPatch,
+    patch?: CellBorderPatch,
+  ): number {
+    const normalizedAddress = resolveCellAddress(
+      addressOrRowNumber,
+      typeof addressOrRowNumber === "number" ? (columnOrPatch as number | string) : undefined,
+    );
+    const nextPatch = resolveSetBorderPatch(addressOrRowNumber, columnOrPatch, patch);
+    const currentStyleId = this.getStyleId(normalizedAddress) ?? 0;
+    const currentStyle = this.workbook.getStyle(currentStyleId);
+    if (!currentStyle) {
+      throw new XlsxError("Cell style not found");
+    }
+
+    const nextBorderId = this.workbook.cloneBorder(currentStyle.borderId, nextPatch);
+    const nextStyleId = this.workbook.cloneStyle(currentStyleId, {
+      borderId: nextBorderId,
+      applyBorder: true,
+    });
+    this.setStyleId(normalizedAddress, nextStyleId);
+    return nextBorderId;
   }
 
   cloneStyle(address: string, patch?: CellStylePatch): number;
@@ -4220,6 +4259,14 @@ function resolveSetFillPatch(
   patch: CellFillPatch | undefined,
 ): CellFillPatch {
   return typeof addressOrRowNumber === "number" ? (patch ?? {}) : (columnOrPatch as CellFillPatch);
+}
+
+function resolveSetBorderPatch(
+  addressOrRowNumber: string | number,
+  columnOrPatch: number | string | CellBorderPatch,
+  patch: CellBorderPatch | undefined,
+): CellBorderPatch {
+  return typeof addressOrRowNumber === "number" ? (patch ?? {}) : (columnOrPatch as CellBorderPatch);
 }
 
 function resolveSetStyleId(

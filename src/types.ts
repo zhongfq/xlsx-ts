@@ -160,6 +160,58 @@ export interface CellFillPatch {
   bgColor?: CellFillColorPatch | null;
 }
 
+export interface CellBorderColor {
+  rgb?: string;
+  theme?: number;
+  indexed?: number;
+  auto?: boolean;
+  tint?: number;
+}
+
+export interface CellBorderColorPatch {
+  rgb?: string | null;
+  theme?: number | null;
+  indexed?: number | null;
+  auto?: boolean | null;
+  tint?: number | null;
+}
+
+export interface CellBorderSideDefinition {
+  style: string | null;
+  color: CellBorderColor | null;
+}
+
+export interface CellBorderSidePatch {
+  style?: string | null;
+  color?: CellBorderColorPatch | null;
+}
+
+export interface CellBorderDefinition {
+  left: CellBorderSideDefinition | null;
+  right: CellBorderSideDefinition | null;
+  top: CellBorderSideDefinition | null;
+  bottom: CellBorderSideDefinition | null;
+  diagonal: CellBorderSideDefinition | null;
+  vertical: CellBorderSideDefinition | null;
+  horizontal: CellBorderSideDefinition | null;
+  diagonalUp: boolean | null;
+  diagonalDown: boolean | null;
+  outline: boolean | null;
+}
+
+export interface CellBorderPatch {
+  left?: CellBorderSidePatch | null;
+  right?: CellBorderSidePatch | null;
+  top?: CellBorderSidePatch | null;
+  bottom?: CellBorderSidePatch | null;
+  diagonal?: CellBorderSidePatch | null;
+  vertical?: CellBorderSidePatch | null;
+  horizontal?: CellBorderSidePatch | null;
+  diagonalUp?: boolean | null;
+  diagonalDown?: boolean | null;
+  outline?: boolean | null;
+}
+
 export interface DefinedName {
   hidden: boolean;
   name: string;

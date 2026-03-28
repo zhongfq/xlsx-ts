@@ -1,5 +1,7 @@
 import type { Sheet } from "./sheet.js";
 import type {
+  CellBorderDefinition,
+  CellBorderPatch,
   CellFillDefinition,
   CellFillPatch,
   CellFontDefinition,
@@ -52,6 +54,10 @@ export class Cell {
     return this.sheet.getFill(this.address);
   }
 
+  get border(): CellBorderDefinition | null {
+    return this.sheet.getBorder(this.address);
+  }
+
   get type(): CellType {
     return this.getSnapshot().type;
   }
@@ -82,6 +88,10 @@ export class Cell {
 
   setFill(patch: CellFillPatch): number {
     return this.sheet.setFill(this.address, patch);
+  }
+
+  setBorder(patch: CellBorderPatch): number {
+    return this.sheet.setBorder(this.address, patch);
   }
 
   cloneStyle(patch: CellStylePatch = {}): number {

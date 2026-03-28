@@ -125,6 +125,11 @@ export class Sheet {
     return parseColumnStyleId(this.getSheetIndex().xml, columnNumber);
   }
 
+  getColumnStyle(column: number | string): CellStyleDefinition | null {
+    const styleId = this.getColumnStyleId(column);
+    return styleId === null ? null : this.workbook.getStyle(styleId);
+  }
+
   copyStyle(sourceAddress: string, targetAddress: string): void;
   copyStyle(
     sourceRowNumber: number,
@@ -194,6 +199,11 @@ export class Sheet {
   getRowStyleId(rowNumber: number): number | null {
     assertRowNumber(rowNumber);
     return parseRowStyleId(this.getSheetIndex().rows.get(rowNumber)?.attributesSource);
+  }
+
+  getRowStyle(rowNumber: number): CellStyleDefinition | null {
+    const styleId = this.getRowStyleId(rowNumber);
+    return styleId === null ? null : this.workbook.getStyle(styleId);
   }
 
   getRow(rowNumber: number): CellValue[] {
@@ -809,6 +819,12 @@ export class Sheet {
     }
   }
 
+  cloneColumnStyle(column: number | string, patch: CellStylePatch = {}): number {
+    const nextStyleId = this.workbook.cloneStyle(this.getColumnStyleId(column) ?? 0, patch);
+    this.setColumnStyleId(column, nextStyleId);
+    return nextStyleId;
+  }
+
   deleteCell(address: string): void;
   deleteCell(rowNumber: number, column: number | string): void;
   deleteCell(addressOrRowNumber: string | number, column?: number | string): void {
@@ -895,6 +911,13 @@ export class Sheet {
         buildStyledRowXml(index.xml, row, styleId) +
         index.xml.slice(row.end),
     );
+  }
+
+  cloneRowStyle(rowNumber: number, patch: CellStylePatch = {}): number {
+    assertRowNumber(rowNumber);
+    const nextStyleId = this.workbook.cloneStyle(this.getRowStyleId(rowNumber) ?? 0, patch);
+    this.setRowStyleId(rowNumber, nextStyleId);
+    return nextStyleId;
   }
 
   addMergedRange(range: string): void {

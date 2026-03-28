@@ -84,11 +84,15 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `sheet.getStyle(address)`
 - `sheet.getStyle(rowNumber, column)`
 - `sheet.getRowStyleId(rowNumber)`
+- `sheet.getRowStyle(rowNumber)`
 - `sheet.getColumnStyleId(column)`
+- `sheet.getColumnStyle(column)`
 - `sheet.copyStyle(sourceAddress, targetAddress)`
 - `sheet.copyStyle(sourceRowNumber, sourceColumn, targetRowNumber, targetColumn)`
 - `sheet.cloneStyle(address, patch?)`
 - `sheet.cloneStyle(rowNumber, column, patch?)`
+- `sheet.cloneRowStyle(rowNumber, patch?)`
+- `sheet.cloneColumnStyle(column, patch?)`
 - `sheet.getCellEntries()`
 - `sheet.iterCellEntries()`
 - `sheet.rowCount`
@@ -251,6 +255,8 @@ Notes:
 - `sheet.cloneStyle()` clones the current cell style, writes the new definition into `styles.xml`, applies it back to the same cell, and supports both `A1` and `(rowNumber, column)` calls.
 - `sheet.getStyleId()` and `setStyleId()` still only read and write the cell-level `s="..."` style index itself.
 - `sheet.getRowStyleId()` and `setRowStyleId()` currently read and write the row-level `<row s="..." customFormat="1">` style index; that layer still does not modify `styles.xml`.
+- `sheet.getRowStyle()` and `sheet.getColumnStyle()` resolve the currently assigned row/column style definition; they return `null` when no explicit row/column style is present.
+- `sheet.cloneRowStyle()` and `sheet.cloneColumnStyle()` clone the current row/column style into a new `styleId` and apply it immediately; when no explicit row/column style exists yet, they clone from the default style `0`.
 - `sheet.getColumnStyleId()` and `setColumnStyleId()` currently read and write the column-level `<cols><col ... style="..."/>` style index, and those ranges are shifted during column insert/delete operations.
 - `sheet.copyStyle()` currently copies the source cell's `styleId` onto the target cell without changing the target cell's value or formula; both address and `(rowNumber, column)` calls are supported.
 - `sheet.getFreezePane()`, `freezePane()`, and `unfreezePane()` currently manage worksheet `sheetViews/sheetView/pane`; `topLeftCell` keeps tracking row and column insert/delete operations.

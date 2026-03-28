@@ -462,6 +462,114 @@ test("row style id APIs read and write row-level style indexes", async () => {
   assert.match(sheetXml, /<row r="3" s="7" customFormat="1">\s*<c r="A3"><v>3<\/v><\/c>\s*<\/row>/);
 });
 
+test("row and column style definition APIs read and clone style definitions", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = await loadFixtureEntries(fixtureDir);
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  assert.equal(sheet.getRowStyle(1), null);
+  assert.equal(sheet.getColumnStyle("A"), null);
+
+  sheet.setRowStyleId(2, 1);
+  sheet.setColumnStyleId("B", 1);
+
+  assert.deepEqual(sheet.getRowStyle(2), {
+    numFmtId: 0,
+    fontId: 1,
+    fillId: 0,
+    borderId: 0,
+    xfId: 0,
+    quotePrefix: null,
+    pivotButton: null,
+    applyNumberFormat: null,
+    applyFont: true,
+    applyFill: null,
+    applyBorder: null,
+    applyAlignment: null,
+    applyProtection: null,
+    alignment: null,
+  });
+  assert.deepEqual(sheet.getColumnStyle("B"), {
+    numFmtId: 0,
+    fontId: 1,
+    fillId: 0,
+    borderId: 0,
+    xfId: 0,
+    quotePrefix: null,
+    pivotButton: null,
+    applyNumberFormat: null,
+    applyFont: true,
+    applyFill: null,
+    applyBorder: null,
+    applyAlignment: null,
+    applyProtection: null,
+    alignment: null,
+  });
+
+  const rowStyleId = sheet.cloneRowStyle(3, {
+    applyAlignment: true,
+    alignment: {
+      horizontal: "right",
+    },
+  });
+  const columnStyleId = sheet.cloneColumnStyle("C", {
+    applyAlignment: true,
+    alignment: {
+      horizontal: "center",
+    },
+  });
+
+  assert.equal(rowStyleId, 2);
+  assert.equal(columnStyleId, 3);
+  assert.equal(sheet.getRowStyleId(3), 2);
+  assert.equal(sheet.getColumnStyleId("C"), 3);
+  assert.deepEqual(sheet.getRowStyle(3), {
+    numFmtId: 0,
+    fontId: 0,
+    fillId: 0,
+    borderId: 0,
+    xfId: 0,
+    quotePrefix: null,
+    pivotButton: null,
+    applyNumberFormat: null,
+    applyFont: null,
+    applyFill: null,
+    applyBorder: null,
+    applyAlignment: true,
+    applyProtection: null,
+    alignment: {
+      horizontal: "right",
+    },
+  });
+  assert.deepEqual(sheet.getColumnStyle("C"), {
+    numFmtId: 0,
+    fontId: 0,
+    fillId: 0,
+    borderId: 0,
+    xfId: 0,
+    quotePrefix: null,
+    pivotButton: null,
+    applyNumberFormat: null,
+    applyFont: null,
+    applyFill: null,
+    applyBorder: null,
+    applyAlignment: true,
+    applyProtection: null,
+    alignment: {
+      horizontal: "center",
+    },
+  });
+
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  const stylesXml = entryText(workbook.toEntries(), "xl/styles.xml");
+
+  assert.match(sheetXml, /<row r="2" s="1" customFormat="1"\/>/);
+  assert.match(sheetXml, /<row r="3" s="2" customFormat="1"\/>/);
+  assert.match(sheetXml, /<cols><col min="2" max="2" style="1"\/><col min="3" max="3" style="3"\/><\/cols>/);
+  assert.match(stylesXml, /<cellXfs count="4">/);
+});
+
 test("column style id APIs read, write, and shift with column edits", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = replaceEntryText(

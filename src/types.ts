@@ -21,6 +21,24 @@ export interface Hyperlink {
   type: "external" | "internal";
 }
 
+export interface DataValidation {
+  range: string;
+  type: string | null;
+  operator: string | null;
+  allowBlank: boolean | null;
+  showInputMessage: boolean | null;
+  showErrorMessage: boolean | null;
+  showDropDown: boolean | null;
+  errorStyle: string | null;
+  errorTitle: string | null;
+  error: string | null;
+  promptTitle: string | null;
+  prompt: string | null;
+  imeMode: string | null;
+  formula1: string | null;
+  formula2: string | null;
+}
+
 export interface SetFormulaOptions {
   cachedValue?: CellValue;
 }
@@ -32,4 +50,21 @@ export interface SetDefinedNameOptions {
 export interface SetHyperlinkOptions {
   text?: string;
   tooltip?: string;
+}
+
+export interface SetDataValidationOptions {
+  type?: string;
+  operator?: string;
+  allowBlank?: boolean;
+  showInputMessage?: boolean;
+  showErrorMessage?: boolean;
+  showDropDown?: boolean;
+  errorStyle?: string;
+  errorTitle?: string;
+  error?: string;
+  promptTitle?: string;
+  prompt?: string;
+  imeMode?: string;
+  formula1?: string;
+  formula2?: string;
 }

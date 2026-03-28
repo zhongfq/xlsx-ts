@@ -1362,6 +1362,142 @@ test("sheet autoFilter APIs read, write, shift, and remove filters", async () =>
   assert.doesNotMatch(sheetXml, /<sortState\b/);
 });
 
+test("sheet dataValidation APIs read, write, shift, and remove validations", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>2</v></c><c r="C1"><v>3</v></c><c r="D1"><v>4</v></c></row>
+    <row r="2"><c r="A2"><v>5</v></c><c r="B2"><v>6</v></c><c r="C2"><v>7</v></c><c r="D2"><v>8</v></c></row>
+  </sheetData>
+</worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  assert.deepEqual(sheet.getDataValidations(), []);
+
+  sheet.setDataValidation("A2:B4", {
+    type: "whole",
+    operator: "between",
+    allowBlank: true,
+    showErrorMessage: true,
+    errorStyle: "stop",
+    errorTitle: "Invalid",
+    error: "Enter 1-10",
+    formula1: "1",
+    formula2: "10",
+  });
+  sheet.setDataValidation("D2", {
+    type: "list",
+    showDropDown: false,
+    promptTitle: "Pick",
+    prompt: "Choose one",
+    formula1: "\"Yes,No\"",
+  });
+
+  assert.deepEqual(sheet.getDataValidations(), [
+    {
+      range: "A2:B4",
+      type: "whole",
+      operator: "between",
+      allowBlank: true,
+      showInputMessage: null,
+      showErrorMessage: true,
+      showDropDown: null,
+      errorStyle: "stop",
+      errorTitle: "Invalid",
+      error: "Enter 1-10",
+      promptTitle: null,
+      prompt: null,
+      imeMode: null,
+      formula1: "1",
+      formula2: "10",
+    },
+    {
+      range: "D2",
+      type: "list",
+      operator: null,
+      allowBlank: null,
+      showInputMessage: null,
+      showErrorMessage: null,
+      showDropDown: false,
+      errorStyle: null,
+      errorTitle: null,
+      error: null,
+      promptTitle: "Pick",
+      prompt: "Choose one",
+      imeMode: null,
+      formula1: "\"Yes,No\"",
+      formula2: null,
+    },
+  ]);
+
+  let sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.match(sheetXml, /<dataValidations count="2">/);
+  assert.match(
+    sheetXml,
+    /<dataValidation sqref="A2:B4" type="whole" operator="between" allowBlank="1" showErrorMessage="1" errorStyle="stop" errorTitle="Invalid" error="Enter 1-10"><formula1>1<\/formula1><formula2>10<\/formula2><\/dataValidation>/,
+  );
+  assert.match(
+    sheetXml,
+    /<dataValidation sqref="D2" type="list" showDropDown="0" promptTitle="Pick" prompt="Choose one"><formula1>&quot;Yes,No&quot;<\/formula1><\/dataValidation>/,
+  );
+
+  sheet.insertColumn("B");
+
+  assert.deepEqual(sheet.getDataValidations(), [
+    {
+      range: "A2:C4",
+      type: "whole",
+      operator: "between",
+      allowBlank: true,
+      showInputMessage: null,
+      showErrorMessage: true,
+      showDropDown: null,
+      errorStyle: "stop",
+      errorTitle: "Invalid",
+      error: "Enter 1-10",
+      promptTitle: null,
+      prompt: null,
+      imeMode: null,
+      formula1: "1",
+      formula2: "10",
+    },
+    {
+      range: "E2",
+      type: "list",
+      operator: null,
+      allowBlank: null,
+      showInputMessage: null,
+      showErrorMessage: null,
+      showDropDown: false,
+      errorStyle: null,
+      errorTitle: null,
+      error: null,
+      promptTitle: "Pick",
+      prompt: "Choose one",
+      imeMode: null,
+      formula1: "\"Yes,No\"",
+      formula2: null,
+    },
+  ]);
+
+  sheet.removeDataValidation("A2:C4");
+
+  sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.match(sheetXml, /<dataValidations count="1"><dataValidation sqref="E2" type="list" showDropDown="0" promptTitle="Pick" prompt="Choose one"><formula1>&quot;Yes,No&quot;<\/formula1><\/dataValidation><\/dataValidations>/);
+
+  sheet.removeDataValidation("E2");
+
+  sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.deepEqual(sheet.getDataValidations(), []);
+  assert.doesNotMatch(sheetXml, /<dataValidations\b/);
+});
+
 test("workbook defined name APIs read, write, and delete global and local names", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = replaceEntryText(

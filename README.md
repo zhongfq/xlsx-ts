@@ -77,6 +77,7 @@
 - `sheet.getUsedRange()`
 - `sheet.getMergedRanges()`
 - `sheet.getAutoFilter()`
+- `sheet.getDataValidations()`
 - `sheet.getTables()`
 - `sheet.getHyperlinks()`
 - `sheet.addTable(range, options?)`
@@ -85,6 +86,8 @@
 - `sheet.removeHyperlink(address)`
 - `sheet.setAutoFilter(range)`
 - `sheet.removeAutoFilter()`
+- `sheet.setDataValidation(range, options?)`
+- `sheet.removeDataValidation(range)`
 - `sheet.setCell(address, value)`
 - `sheet.deleteRow(row, count?)`
 - `sheet.deleteColumn(column, count?)`
@@ -128,6 +131,7 @@ sheet.addTable("A1:B10", { name: "Scores" });
 sheet.setHyperlink("A1", "https://example.com", { text: "Hello", tooltip: "Open link" });
 sheet.setHyperlink("B2", "#Summary!A1");
 sheet.setAutoFilter("A1:F20");
+sheet.setDataValidation("B2:B100", { type: "whole", operator: "between", formula1: "0", formula2: "100" });
 sheet.setCell("A1", "Hello");
 sheet.deleteRow(8);
 sheet.deleteColumn("G");
@@ -161,6 +165,7 @@ sheet.addMergedRange("D1:E1");
 sheet.setFormula("B1", "SUM(1,2)", { cachedValue: 3 });
 sheet.removeHyperlink("B2");
 sheet.removeAutoFilter();
+sheet.removeDataValidation("B2:B100");
 sheet.removeTable("Scores");
 detailSheet.setCell("A1", "created");
 workbook.setSheetVisibility("Summary", "visible");
@@ -186,6 +191,7 @@ await workbook.save("output.xlsx");
 - `sheet.getTables()` 当前可以读取已有 table 的名称、显示名、范围和部件路径
 - `sheet.getHyperlinks()` 当前可以读取当前 sheet 上的内部和外部超链接；外部链接会解析 sheet rel 里的目标地址
 - `sheet.getAutoFilter()` / `sheet.setAutoFilter()` / `sheet.removeAutoFilter()` 当前支持读写 worksheet 顶层 `autoFilter`，移除时会一并清掉顶层 `sortState`
+- `sheet.getDataValidations()` / `sheet.setDataValidation()` / `sheet.removeDataValidation()` 当前支持读写 worksheet 顶层 `dataValidations`，包括常见属性与 `formula1/formula2`，并继续跟随插删行列维护 `sqref`
 - `sheet.addTable()` 当前会创建最基础的 table part、sheet rel、`[Content_Types].xml` override 和 table XML；列名默认取范围首行，空列名会回退到 `ColumnN`
 - `sheet.removeTable()` 当前会同步移除当前 sheet 的 `tableParts`、sheet rel、table XML 和对应的 content type override
 - `sheet.setHyperlink()` / `sheet.removeHyperlink()` 当前支持维护 worksheet `<hyperlinks>` 与外部链接对应的 sheet rel，内部链接 target 用 `#Sheet1!A1` 这种格式

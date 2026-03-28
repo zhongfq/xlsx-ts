@@ -82,6 +82,7 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `sheet.getUsedRange()`
 - `sheet.getMergedRanges()`
 - `sheet.getAutoFilter()`
+- `sheet.getDataValidations()`
 - `sheet.getTables()`
 - `sheet.getHyperlinks()`
 - `sheet.addTable(range, options?)`
@@ -90,6 +91,8 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `sheet.removeHyperlink(address)`
 - `sheet.setAutoFilter(range)`
 - `sheet.removeAutoFilter()`
+- `sheet.setDataValidation(range, options?)`
+- `sheet.removeDataValidation(range)`
 - `sheet.setCell(address, value)`
 - `sheet.deleteRow(row, count?)`
 - `sheet.deleteColumn(column, count?)`
@@ -133,6 +136,7 @@ sheet.addTable("A1:B10", { name: "Scores" });
 sheet.setHyperlink("A1", "https://example.com", { text: "Hello", tooltip: "Open link" });
 sheet.setHyperlink("B2", "#Summary!A1");
 sheet.setAutoFilter("A1:F20");
+sheet.setDataValidation("B2:B100", { type: "whole", operator: "between", formula1: "0", formula2: "100" });
 sheet.setCell("A1", "Hello");
 sheet.deleteRow(8);
 sheet.deleteColumn("G");
@@ -166,6 +170,7 @@ sheet.addMergedRange("D1:E1");
 sheet.setFormula("B1", "SUM(1,2)", { cachedValue: 3 });
 sheet.removeHyperlink("B2");
 sheet.removeAutoFilter();
+sheet.removeDataValidation("B2:B100");
 sheet.removeTable("Scores");
 detailSheet.setCell("A1", "created");
 workbook.setSheetVisibility("Summary", "visible");
@@ -191,6 +196,7 @@ Notes:
 - `sheet.getTables()` currently reads existing table names, display names, ranges, and part paths.
 - `sheet.getHyperlinks()` currently reads internal and external hyperlinks from the sheet; external link targets are resolved through the sheet relationships part.
 - `sheet.getAutoFilter()`, `sheet.setAutoFilter()`, and `sheet.removeAutoFilter()` currently manage the worksheet-level `autoFilter`; removing it also clears the top-level `sortState`.
+- `sheet.getDataValidations()`, `sheet.setDataValidation()`, and `sheet.removeDataValidation()` currently manage worksheet-level `dataValidations`, including common attributes plus `formula1` and `formula2`, and keep `sqref` updated during row and column edits.
 - `sheet.addTable()` currently creates the basic table part, sheet relationship, `[Content_Types].xml` override, and table XML. Column names default to the first row in the range, and blank names fall back to `ColumnN`.
 - `sheet.removeTable()` currently removes the current sheet's `tableParts`, sheet relationship, table XML, and matching content type override.
 - Existing linked tables keep their own `ref` and `autoFilter` updated during row and column insert/delete operations. If a table becomes empty, its `tableParts` entry is removed from the sheet.

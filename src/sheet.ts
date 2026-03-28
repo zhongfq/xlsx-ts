@@ -1,5 +1,13 @@
 import { Cell } from "./cell.js";
-import type { CellType, CellValue, Hyperlink, SetFormulaOptions, SetHyperlinkOptions } from "./types.js";
+import type {
+  CellType,
+  CellValue,
+  DataValidation,
+  Hyperlink,
+  SetDataValidationOptions,
+  SetFormulaOptions,
+  SetHyperlinkOptions,
+} from "./types.js";
 import { XlsxError } from "./errors.js";
 import type { Workbook } from "./workbook.js";
 import { basenamePosix, dirnamePosix, resolvePosix } from "./utils/path.js";
@@ -250,6 +258,10 @@ export class Sheet {
     return parseSheetAutoFilter(this.getSheetIndex().xml);
   }
 
+  getDataValidations(): DataValidation[] {
+    return parseSheetDataValidations(this.getSheetIndex().xml);
+  }
+
   getTables(): Array<{ name: string; displayName: string; range: string; path: string }> {
     const tables: Array<{ name: string; displayName: string; range: string; path: string }> = [];
 
@@ -348,6 +360,28 @@ export class Sheet {
 
   removeAutoFilter(): void {
     const nextSheetXml = removeAutoFilterFromSheetXml(this.getSheetIndex().xml);
+
+    if (nextSheetXml !== this.getSheetIndex().xml) {
+      this.writeSheetXml(nextSheetXml);
+    }
+  }
+
+  setDataValidation(range: string, options: SetDataValidationOptions = {}): void {
+    const normalizedRange = normalizeSqref(range);
+    const nextSheetXml = upsertDataValidationInSheetXml(
+      this.getSheetIndex().xml,
+      buildDataValidationXml(normalizedRange, options),
+      normalizedRange,
+    );
+
+    if (nextSheetXml !== this.getSheetIndex().xml) {
+      this.writeSheetXml(nextSheetXml);
+    }
+  }
+
+  removeDataValidation(range: string): void {
+    const normalizedRange = normalizeSqref(range);
+    const nextSheetXml = removeDataValidationFromSheetXml(this.getSheetIndex().xml, normalizedRange);
 
     if (nextSheetXml !== this.getSheetIndex().xml) {
       this.writeSheetXml(nextSheetXml);
@@ -1613,6 +1647,20 @@ function normalizeRangeRef(range: string): string {
   return formatRangeRef(startRow, startColumn, endRow, endColumn);
 }
 
+function normalizeSqref(rangeList: string): string {
+  const ranges = rangeList
+    .trim()
+    .split(/\s+/)
+    .filter((range) => range.length > 0)
+    .map((range) => normalizeRangeRef(range));
+
+  if (ranges.length === 0) {
+    throw new XlsxError(`Invalid sqref: ${rangeList}`);
+  }
+
+  return ranges.join(" ");
+}
+
 function parseRangeRef(range: string): {
   startRow: number;
   endRow: number;
@@ -1862,7 +1910,7 @@ function rewriteWorksheetReferenceTag(
   transformRange: (range: string) => string | null,
 ): string {
   const regex = new RegExp(
-    `<${escapeRegex(tagName)}\\b([^>]*?)(\\/?>|>[\\s\\S]*?<\\/${escapeRegex(tagName)}>)`,
+    `<${escapeRegex(tagName)}\\b([^>]*?)(\\/>|>[\\s\\S]*?<\\/${escapeRegex(tagName)}>)`,
     "g",
   );
 
@@ -2663,6 +2711,144 @@ function removeAutoFilterFromSheetXml(sheetXml: string): string {
     .replace(/<sortState\b[^>]*\/>/, "");
 }
 
+function parseSheetDataValidations(sheetXml: string): DataValidation[] {
+  const dataValidationsMatch = sheetXml.match(/<dataValidations\b[^>]*>([\s\S]*?)<\/dataValidations>/);
+  if (!dataValidationsMatch) {
+    return [];
+  }
+
+  return parseDataValidationEntries(dataValidationsMatch[1])
+    .map(({ attributesSource, innerXml }) => {
+      const sqref = getXmlAttr(attributesSource, "sqref");
+      if (!sqref) {
+        return null;
+      }
+
+      const errorTitle = getXmlAttr(attributesSource, "errorTitle");
+      const error = getXmlAttr(attributesSource, "error");
+      const promptTitle = getXmlAttr(attributesSource, "promptTitle");
+      const prompt = getXmlAttr(attributesSource, "prompt");
+      const formula1 = extractTagText(innerXml, "formula1");
+      const formula2 = extractTagText(innerXml, "formula2");
+
+      return {
+        range: normalizeSqref(sqref),
+        type: getXmlAttr(attributesSource, "type") ?? null,
+        operator: getXmlAttr(attributesSource, "operator") ?? null,
+        allowBlank: parseOptionalXmlBoolean(getXmlAttr(attributesSource, "allowBlank")),
+        showInputMessage: parseOptionalXmlBoolean(getXmlAttr(attributesSource, "showInputMessage")),
+        showErrorMessage: parseOptionalXmlBoolean(getXmlAttr(attributesSource, "showErrorMessage")),
+        showDropDown: parseOptionalXmlBoolean(getXmlAttr(attributesSource, "showDropDown")),
+        errorStyle: getXmlAttr(attributesSource, "errorStyle") ?? null,
+        errorTitle: errorTitle ? decodeXmlText(errorTitle) : null,
+        error: error ? decodeXmlText(error) : null,
+        promptTitle: promptTitle ? decodeXmlText(promptTitle) : null,
+        prompt: prompt ? decodeXmlText(prompt) : null,
+        imeMode: getXmlAttr(attributesSource, "imeMode") ?? null,
+        formula1: formula1 ? decodeXmlText(formula1) : null,
+        formula2: formula2 ? decodeXmlText(formula2) : null,
+      };
+    })
+    .filter((validation): validation is DataValidation => validation !== null);
+}
+
+function parseDataValidationEntries(innerXml: string): Array<{
+  attributesSource: string;
+  innerXml: string;
+  xml: string;
+}> {
+  return Array.from(
+    innerXml.matchAll(/<dataValidation\b([^>]*?)(?:\/>|>([\s\S]*?)<\/dataValidation>)/g),
+    (match) => ({
+      attributesSource: match[1],
+      innerXml: match[2] ?? "",
+      xml: match[0],
+    }),
+  );
+}
+
+function buildDataValidationXml(range: string, options: SetDataValidationOptions): string {
+  const attributes: Array<[string, string]> = [["sqref", normalizeSqref(range)]];
+  appendOptionalAttribute(attributes, "type", options.type);
+  appendOptionalAttribute(attributes, "operator", options.operator);
+  appendOptionalBooleanAttribute(attributes, "allowBlank", options.allowBlank);
+  appendOptionalBooleanAttribute(attributes, "showInputMessage", options.showInputMessage);
+  appendOptionalBooleanAttribute(attributes, "showErrorMessage", options.showErrorMessage);
+  appendOptionalBooleanAttribute(attributes, "showDropDown", options.showDropDown);
+  appendOptionalAttribute(attributes, "errorStyle", options.errorStyle);
+  appendOptionalAttribute(attributes, "errorTitle", options.errorTitle);
+  appendOptionalAttribute(attributes, "error", options.error);
+  appendOptionalAttribute(attributes, "promptTitle", options.promptTitle);
+  appendOptionalAttribute(attributes, "prompt", options.prompt);
+  appendOptionalAttribute(attributes, "imeMode", options.imeMode);
+
+  const formulas: string[] = [];
+  if (options.formula1 !== undefined) {
+    formulas.push(`<formula1>${escapeXmlText(options.formula1)}</formula1>`);
+  }
+  if (options.formula2 !== undefined) {
+    formulas.push(`<formula2>${escapeXmlText(options.formula2)}</formula2>`);
+  }
+
+  return formulas.length === 0
+    ? `<dataValidation ${serializeAttributes(attributes)}/>`
+    : `<dataValidation ${serializeAttributes(attributes)}>${formulas.join("")}</dataValidation>`;
+}
+
+function upsertDataValidationInSheetXml(sheetXml: string, dataValidationXml: string, range: string): string {
+  const normalizedRange = normalizeSqref(range);
+  const dataValidationsMatch = sheetXml.match(/<dataValidations\b[^>]*>([\s\S]*?)<\/dataValidations>/);
+  const dataValidations = (dataValidationsMatch
+    ? parseDataValidationEntries(dataValidationsMatch[1]).map((validation) => ({
+        range: normalizeSqref(getXmlAttr(validation.attributesSource, "sqref") ?? ""),
+        xml: validation.xml,
+      }))
+    : []
+  ).filter((validation) => validation.range !== normalizedRange);
+
+  dataValidations.push({ range: normalizedRange, xml: dataValidationXml });
+  const nextDataValidationsXml =
+    `<dataValidations count="${dataValidations.length}">` +
+    dataValidations.map((validation) => validation.xml).join("") +
+    `</dataValidations>`;
+
+  if (dataValidationsMatch && dataValidationsMatch.index !== undefined) {
+    return (
+      sheetXml.slice(0, dataValidationsMatch.index) +
+      nextDataValidationsXml +
+      sheetXml.slice(dataValidationsMatch.index + dataValidationsMatch[0].length)
+    );
+  }
+
+  const insertionIndex = findWorksheetChildInsertionIndex(sheetXml, DATA_VALIDATIONS_FOLLOWING_TAGS);
+  return sheetXml.slice(0, insertionIndex) + nextDataValidationsXml + sheetXml.slice(insertionIndex);
+}
+
+function removeDataValidationFromSheetXml(sheetXml: string, range: string): string {
+  const normalizedRange = normalizeSqref(range);
+  const dataValidationsMatch = sheetXml.match(/<dataValidations\b[^>]*>([\s\S]*?)<\/dataValidations>/);
+  if (!dataValidationsMatch || dataValidationsMatch.index === undefined) {
+    return sheetXml;
+  }
+
+  const keptDataValidations = parseDataValidationEntries(dataValidationsMatch[1]).filter(
+    (validation) => normalizeSqref(getXmlAttr(validation.attributesSource, "sqref") ?? "") !== normalizedRange,
+  );
+
+  const nextDataValidationsXml =
+    keptDataValidations.length === 0
+      ? ""
+      : `<dataValidations count="${keptDataValidations.length}">${keptDataValidations
+          .map((validation) => validation.xml)
+          .join("")}</dataValidations>`;
+
+  return (
+    sheetXml.slice(0, dataValidationsMatch.index) +
+    nextDataValidationsXml +
+    sheetXml.slice(dataValidationsMatch.index + dataValidationsMatch[0].length)
+  );
+}
+
 function parseSheetHyperlinks(
   sheetXml: string,
   relationshipTargets: Map<string, string>,
@@ -3068,6 +3254,26 @@ function findWorksheetChildInsertionIndex(sheetXml: string, followingTagNames: s
   return closingTagIndex;
 }
 
+function appendOptionalAttribute(attributes: Array<[string, string]>, name: string, value: string | undefined): void {
+  if (value !== undefined) {
+    attributes.push([name, value]);
+  }
+}
+
+function appendOptionalBooleanAttribute(attributes: Array<[string, string]>, name: string, value: boolean | undefined): void {
+  if (value !== undefined) {
+    attributes.push([name, value ? "1" : "0"]);
+  }
+}
+
+function parseOptionalXmlBoolean(value: string | undefined): boolean | null {
+  if (value === undefined) {
+    return null;
+  }
+
+  return value === "1" || value.toLowerCase() === "true";
+}
+
 function addContentTypeOverride(contentTypesXml: string, partPath: string, contentType: string): string {
   if (new RegExp(`PartName="/${escapeRegex(partPath)}"`).test(contentTypesXml)) {
     return contentTypesXml;
@@ -3210,6 +3416,28 @@ const AUTO_FILTER_FOLLOWING_TAGS = [
   "phoneticPr",
   "conditionalFormatting",
   "dataValidations",
+  "hyperlinks",
+  "printOptions",
+  "pageMargins",
+  "pageSetup",
+  "headerFooter",
+  "rowBreaks",
+  "colBreaks",
+  "customProperties",
+  "cellWatches",
+  "ignoredErrors",
+  "smartTags",
+  "drawing",
+  "legacyDrawing",
+  "legacyDrawingHF",
+  "picture",
+  "oleObjects",
+  "controls",
+  "webPublishItems",
+  "tableParts",
+  "extLst",
+];
+const DATA_VALIDATIONS_FOLLOWING_TAGS = [
   "hyperlinks",
   "printOptions",
   "pageMargins",

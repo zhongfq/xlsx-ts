@@ -69,8 +69,10 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `workbook.deleteSheet(name)`
 - `workbook.setSheetVisibility(name, visibility)`
 - `sheet.cell(address)`
+- `sheet.cell(rowNumber, column)`
 - `sheet.rename(name)`
 - `sheet.getCell(address)`
+- `sheet.getCell(rowNumber, column)`
 - `sheet.rowCount`
 - `sheet.columnCount`
 - `sheet.getHeaders(headerRowNumber?)`
@@ -94,6 +96,7 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `sheet.setDataValidation(range, options?)`
 - `sheet.removeDataValidation(range)`
 - `sheet.setCell(address, value)`
+- `sheet.setCell(rowNumber, column, value)`
 - `sheet.deleteRow(row, count?)`
 - `sheet.deleteColumn(column, count?)`
 - `sheet.insertRow(row, count?)`
@@ -113,7 +116,9 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `sheet.addMergedRange(range)`
 - `sheet.removeMergedRange(range)`
 - `sheet.getFormula(address)`
+- `sheet.getFormula(rowNumber, column)`
 - `sheet.setFormula(address, formula, options?)`
+- `sheet.setFormula(rowNumber, column, formula, options?)`
 - `workbook.save(path)`
 
 Example:
@@ -122,6 +127,7 @@ Example:
 const workbook = await Workbook.open("input.xlsx");
 const sheet = workbook.getSheet("Sheet1");
 const scoreCell = sheet.cell("B2");
+const scoreValue = sheet.getCell(2, 2);
 const detailSheet = workbook.addSheet("Detail");
 
 workbook.setDefinedName("Scores", "Summary!$A$1:$B$10");
@@ -137,6 +143,7 @@ sheet.setHyperlink("A1", "https://example.com", { text: "Hello", tooltip: "Open 
 sheet.setHyperlink("B2", "#Summary!A1");
 sheet.setAutoFilter("A1:F20");
 sheet.setDataValidation("B2:B100", { type: "whole", operator: "between", formula1: "0", formula2: "100" });
+sheet.setCell(3, 2, 98);
 sheet.setCell("A1", "Hello");
 sheet.deleteRow(8);
 sheet.deleteColumn("G");
@@ -168,6 +175,7 @@ sheet.setRange("B2", [
 ]);
 sheet.addMergedRange("D1:E1");
 sheet.setFormula("B1", "SUM(1,2)", { cachedValue: 3 });
+sheet.setFormula(4, 3, "SUM(A4:B4)", { cachedValue: 12 });
 sheet.removeHyperlink("B2");
 sheet.removeAutoFilter();
 sheet.removeDataValidation("B2:B100");
@@ -186,6 +194,7 @@ Notes:
 
 - On first read/write access, a sheet scans `sheetData` once and builds indexes for rows and cells.
 - `sheet.cell(address)` returns a reusable `Cell` handle whose parsed value/formula/style state is cached by sheet revision.
+- `sheet.cell()`, `getCell()`, `setCell()`, `getFormula()`, and `setFormula()` now support both `A1` addresses and `(rowNumber, column)` calls. Row and column indexes are 1-based.
 - Later `getCell()` and `getFormula()` calls use those indexes directly instead of running a full string match on every read.
 - `sheet.rowCount` and `sheet.columnCount` currently mean the maximum used row number and maximum used column number. Empty sheets return `0`.
 - After each write, the sheet index is rebuilt so later reads always see the latest content.

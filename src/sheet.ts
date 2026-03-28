@@ -89,8 +89,10 @@ export class Sheet {
     this.relationshipId = options.relationshipId;
   }
 
-  cell(address: string): Cell {
-    const normalizedAddress = normalizeCellAddress(address);
+  cell(address: string): Cell;
+  cell(rowNumber: number, column: number | string): Cell;
+  cell(addressOrRowNumber: string | number, column?: number | string): Cell {
+    const normalizedAddress = resolveCellAddress(addressOrRowNumber, column);
     let cell = this.cellHandles.get(normalizedAddress);
 
     if (!cell) {
@@ -101,16 +103,20 @@ export class Sheet {
     return cell;
   }
 
-  getCell(address: string): CellValue {
-    return this.cell(address).value;
+  getCell(address: string): CellValue;
+  getCell(rowNumber: number, column: number | string): CellValue;
+  getCell(addressOrRowNumber: string | number, column?: number | string): CellValue {
+    return this.cell(resolveCellAddress(addressOrRowNumber, column)).value;
   }
 
   rename(name: string): void {
     this.workbook.renameSheet(this.name, name);
   }
 
-  getFormula(address: string): string | null {
-    return this.cell(address).formula;
+  getFormula(address: string): string | null;
+  getFormula(rowNumber: number, column: number | string): string | null;
+  getFormula(addressOrRowNumber: string | number, column?: number | string): string | null {
+    return this.cell(resolveCellAddress(addressOrRowNumber, column)).formula;
   }
 
   get rowCount(): number {
@@ -600,24 +606,40 @@ export class Sheet {
     this.updateTableReferences(columnNumber, count, 0, 0, "delete");
   }
 
-  setCell(address: string, value: CellValue): void {
-    const normalizedAddress = normalizeCellAddress(address);
+  setCell(address: string, value: CellValue): void;
+  setCell(rowNumber: number, column: number | string, value: CellValue): void;
+  setCell(addressOrRowNumber: string | number, columnOrValue: number | string | CellValue, value?: CellValue): void {
+    const normalizedAddress = resolveCellAddress(addressOrRowNumber, typeof addressOrRowNumber === "number" ? columnOrValue as number | string : undefined);
     const existingCell = this.getSheetIndex().cells.get(normalizedAddress);
+    const nextValue = resolveSetCellValue(addressOrRowNumber, columnOrValue, value);
     this.writeCellXml(
       normalizedAddress,
-      buildValueCellXml(normalizedAddress, value, existingCell?.attributesSource),
+      buildValueCellXml(normalizedAddress, nextValue, existingCell?.attributesSource),
     );
   }
 
-  setFormula(address: string, formula: string, options: SetFormulaOptions = {}): void {
-    const normalizedAddress = normalizeCellAddress(address);
+  setFormula(address: string, formula: string, options?: SetFormulaOptions): void;
+  setFormula(rowNumber: number, column: number | string, formula: string, options?: SetFormulaOptions): void;
+  setFormula(
+    addressOrRowNumber: string | number,
+    columnOrFormula: number | string,
+    formulaOrOptions?: string | SetFormulaOptions,
+    options: SetFormulaOptions = {},
+  ): void {
+    const normalizedAddress = resolveCellAddress(addressOrRowNumber, typeof addressOrRowNumber === "number" ? columnOrFormula as number | string : undefined);
     const existingCell = this.getSheetIndex().cells.get(normalizedAddress);
+    const { formula, formulaOptions } = resolveSetFormulaArguments(
+      addressOrRowNumber,
+      columnOrFormula,
+      formulaOrOptions,
+      options,
+    );
     this.writeCellXml(
       normalizedAddress,
       buildFormulaCellXml(
         normalizedAddress,
         formula,
-        options.cachedValue ?? null,
+        formulaOptions.cachedValue ?? null,
         existingCell?.attributesSource,
       ),
     );
@@ -1640,6 +1662,66 @@ function assertCellAddress(address: string): void {
 function normalizeCellAddress(address: string): string {
   assertCellAddress(address);
   return address.toUpperCase();
+}
+
+function resolveCellAddress(addressOrRowNumber: string | number, column?: number | string): string {
+  if (typeof addressOrRowNumber === "string") {
+    if (column !== undefined) {
+      throw new XlsxError("Column argument is not allowed when address is a string");
+    }
+
+    return normalizeCellAddress(addressOrRowNumber);
+  }
+
+  assertRowNumber(addressOrRowNumber);
+  if (column === undefined) {
+    throw new XlsxError(`Missing column index for row: ${addressOrRowNumber}`);
+  }
+
+  return makeCellAddress(addressOrRowNumber, normalizeColumnNumber(column));
+}
+
+function resolveSetCellValue(
+  addressOrRowNumber: string | number,
+  columnOrValue: number | string | CellValue,
+  value: CellValue | undefined,
+): CellValue {
+  if (typeof addressOrRowNumber === "string") {
+    return columnOrValue as CellValue;
+  }
+
+  if (value === undefined) {
+    throw new XlsxError(`Missing cell value for row ${addressOrRowNumber}`);
+  }
+
+  return value;
+}
+
+function resolveSetFormulaArguments(
+  addressOrRowNumber: string | number,
+  columnOrFormula: number | string,
+  formulaOrOptions: string | SetFormulaOptions | undefined,
+  options: SetFormulaOptions,
+): { formula: string; formulaOptions: SetFormulaOptions } {
+  if (typeof addressOrRowNumber === "string") {
+    if (typeof columnOrFormula !== "string") {
+      throw new XlsxError(`Invalid formula: ${String(columnOrFormula)}`);
+    }
+
+    return {
+      formula: columnOrFormula,
+      formulaOptions: (formulaOrOptions as SetFormulaOptions | undefined) ?? {},
+    };
+  }
+
+  if (typeof formulaOrOptions !== "string") {
+    throw new XlsxError(`Missing formula for row ${addressOrRowNumber}`);
+  }
+
+  return {
+    formula: formulaOrOptions,
+    formulaOptions: options,
+  };
 }
 
 function normalizeRangeRef(range: string): string {

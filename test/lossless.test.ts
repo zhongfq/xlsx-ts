@@ -127,6 +127,25 @@ test("cell handle objects cache parsed state and refresh after writes", async ()
   assert.equal(missing.value, null);
 });
 
+test("cell APIs accept 1-based row and column indexes", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = await loadFixtureEntries(fixtureDir);
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  assert.equal(sheet.getCell(1, 1), "Hello");
+  assert.equal(sheet.cell(1, 1).value, "Hello");
+
+  sheet.setCell(2, 3, "Tail");
+  assert.equal(sheet.getCell("C2"), "Tail");
+  assert.equal(sheet.getCell(2, 3), "Tail");
+
+  sheet.setFormula(3, 2, "SUM(1,2)", { cachedValue: 3 });
+  assert.equal(sheet.getFormula("B3"), "SUM(1,2)");
+  assert.equal(sheet.getFormula(3, 2), "SUM(1,2)");
+  assert.equal(sheet.getCell(3, 2), 3);
+});
+
 test("range APIs read and write rectangular values", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = await loadFixtureEntries(fixtureDir);

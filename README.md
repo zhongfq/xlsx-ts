@@ -64,8 +64,10 @@
 - `workbook.deleteSheet(name)`
 - `workbook.setSheetVisibility(name, visibility)`
 - `sheet.cell(address)`
+- `sheet.cell(rowNumber, column)`
 - `sheet.rename(name)`
 - `sheet.getCell(address)`
+- `sheet.getCell(rowNumber, column)`
 - `sheet.rowCount`
 - `sheet.columnCount`
 - `sheet.getHeaders(headerRowNumber?)`
@@ -89,6 +91,7 @@
 - `sheet.setDataValidation(range, options?)`
 - `sheet.removeDataValidation(range)`
 - `sheet.setCell(address, value)`
+- `sheet.setCell(rowNumber, column, value)`
 - `sheet.deleteRow(row, count?)`
 - `sheet.deleteColumn(column, count?)`
 - `sheet.insertRow(row, count?)`
@@ -108,7 +111,9 @@
 - `sheet.addMergedRange(range)`
 - `sheet.removeMergedRange(range)`
 - `sheet.getFormula(address)`
+- `sheet.getFormula(rowNumber, column)`
 - `sheet.setFormula(address, formula, options?)`
+- `sheet.setFormula(rowNumber, column, formula, options?)`
 - `workbook.save(path)`
 
 示例：
@@ -117,6 +122,7 @@
 const workbook = await Workbook.open("input.xlsx");
 const sheet = workbook.getSheet("Sheet1");
 const scoreCell = sheet.cell("B2");
+const scoreValue = sheet.getCell(2, 2);
 const detailSheet = workbook.addSheet("Detail");
 
 workbook.setDefinedName("Scores", "Summary!$A$1:$B$10");
@@ -132,6 +138,7 @@ sheet.setHyperlink("A1", "https://example.com", { text: "Hello", tooltip: "Open 
 sheet.setHyperlink("B2", "#Summary!A1");
 sheet.setAutoFilter("A1:F20");
 sheet.setDataValidation("B2:B100", { type: "whole", operator: "between", formula1: "0", formula2: "100" });
+sheet.setCell(3, 2, 98);
 sheet.setCell("A1", "Hello");
 sheet.deleteRow(8);
 sheet.deleteColumn("G");
@@ -163,6 +170,7 @@ sheet.setRange("B2", [
 ]);
 sheet.addMergedRange("D1:E1");
 sheet.setFormula("B1", "SUM(1,2)", { cachedValue: 3 });
+sheet.setFormula(4, 3, "SUM(A4:B4)", { cachedValue: 12 });
 sheet.removeHyperlink("B2");
 sheet.removeAutoFilter();
 sheet.removeDataValidation("B2:B100");
@@ -181,6 +189,7 @@ await workbook.save("output.xlsx");
 
 - 同一张工作表首次读写时会扫描一次 `sheetData`，建立单元格与行的位置索引
 - `sheet.cell(address)` 返回可复用的 `Cell` 句柄，值/公式/样式索引会按工作表 revision 缓存
+- `sheet.cell()` / `getCell()` / `setCell()` / `getFormula()` / `setFormula()` 现在同时支持 `A1` 地址和 `(rowNumber, column)` 两种调用方式；行列索引是从 `1` 开始
 - 后续 `getCell` / `getFormula` 会直接走索引查找，不再每次整张表做字符串匹配
 - `sheet.rowCount` / `sheet.columnCount` 当前表示已用区域的最大行号 / 最大列号；空表返回 `0`
 - 每次写入后会重建该表索引，保证后续读取拿到的是最新结果

@@ -151,6 +151,11 @@ export class Sheet {
     return this.getRow(headerRowNumber).map((value) => (typeof value === "string" ? value : ""));
   }
 
+  getRowStyleId(rowNumber: number): number | null {
+    assertRowNumber(rowNumber);
+    return parseRowStyleId(this.getSheetIndex().rows.get(rowNumber)?.attributesSource);
+  }
+
   getRow(rowNumber: number): CellValue[] {
     assertRowNumber(rowNumber);
 
@@ -807,6 +812,34 @@ export class Sheet {
     this.setRow(headerRowNumber, headers, startColumn);
   }
 
+  setRowStyleId(rowNumber: number, styleId: number | null): void {
+    assertRowNumber(rowNumber);
+    assertStyleId(styleId);
+
+    const index = this.getSheetIndex();
+    const row = index.rows.get(rowNumber);
+
+    if (!row) {
+      if (styleId === null) {
+        return;
+      }
+
+      const insertionIndex = findRowInsertionIndex(index, rowNumber);
+      this.writeSheetXml(
+        index.xml.slice(0, insertionIndex) +
+          buildEmptyStyledRowXml(rowNumber, styleId) +
+          index.xml.slice(insertionIndex),
+      );
+      return;
+    }
+
+    this.writeSheetXml(
+      index.xml.slice(0, row.start) +
+        buildStyledRowXml(index.xml, row, styleId) +
+        index.xml.slice(row.end),
+    );
+  }
+
   addMergedRange(range: string): void {
     const normalizedRange = normalizeRangeRef(range);
     const ranges = this.getMergedRanges();
@@ -1306,6 +1339,50 @@ function buildCellAttributesWithStyle(
 
   if (styleId !== null) {
     nextAttributes.push(["s", String(styleId)]);
+  }
+
+  nextAttributes.push(...preserved);
+  return nextAttributes;
+}
+
+function parseRowStyleId(attributesSource: string | undefined): number | null {
+  if (!attributesSource) {
+    return null;
+  }
+
+  const styleId = getXmlAttr(attributesSource, "s");
+  return styleId === undefined ? null : Number(styleId);
+}
+
+function buildStyledRowXml(sheetXml: string, row: LocatedRow, styleId: number | null): string {
+  const serializedAttributes = serializeAttributes(
+    buildRowAttributesWithStyle(row.rowNumber, styleId, row.attributesSource),
+  );
+
+  if (row.selfClosing) {
+    return `<row ${serializedAttributes}/>`;
+  }
+
+  return `<row ${serializedAttributes}>${sheetXml.slice(row.innerStart, row.innerEnd)}</row>`;
+}
+
+function buildEmptyStyledRowXml(rowNumber: number, styleId: number): string {
+  return `<row ${serializeAttributes(buildRowAttributesWithStyle(rowNumber, styleId))}/>`;
+}
+
+function buildRowAttributesWithStyle(
+  rowNumber: number,
+  styleId: number | null,
+  existingAttributesSource = "",
+): Array<[string, string]> {
+  const attributes = parseAttributes(existingAttributesSource);
+  const preserved = attributes.filter(
+    ([name]) => name !== "r" && name !== "s" && name !== "customFormat",
+  );
+  const nextAttributes: Array<[string, string]> = [["r", String(rowNumber)]];
+
+  if (styleId !== null) {
+    nextAttributes.push(["s", String(styleId)], ["customFormat", "1"]);
   }
 
   nextAttributes.push(...preserved);

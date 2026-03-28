@@ -198,6 +198,53 @@ test("insertColumn shifts cell addresses, formulas, and merged ranges together",
   assert.match(sheetXml, /<dimension ref="A1:D2"\/>/);
 });
 
+test("insertRow shifts cell addresses, formulas, and merged ranges together", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1:B3"/>
+  <sheetData>
+    <row r="1">
+      <c r="A1"><v>1</v></c>
+      <c r="B1"><f>SUM(A2:B2)</f><v>3</v></c>
+    </row>
+    <row r="2">
+      <c r="A2"><v>2</v></c>
+      <c r="B2"><v>4</v></c>
+    </row>
+    <row r="3">
+      <c r="A3"><f>Sheet1!A2</f><v>2</v></c>
+      <c r="B3"><v>5</v></c>
+    </row>
+  </sheetData>
+  <mergeCells count="1"><mergeCell ref="A2:B3"/></mergeCells>
+</worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.insertRow(2);
+
+  assert.equal(sheet.getCell("A1"), 1);
+  assert.equal(sheet.getCell("A2"), null);
+  assert.equal(sheet.getCell("A3"), 2);
+  assert.equal(sheet.getCell("A4"), 2);
+  assert.equal(sheet.getFormula("B1"), "SUM(A3:B3)");
+  assert.equal(sheet.getFormula("A4"), "Sheet1!A3");
+  assert.deepEqual(sheet.getMergedRanges(), ["A3:B4"]);
+  assert.equal(sheet.getUsedRange(), "A1:B4");
+
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.match(sheetXml, /<row r="3">[\s\S]*<c r="A3"><v>2<\/v><\/c>[\s\S]*<c r="B3"><v>4<\/v><\/c>[\s\S]*<\/row>/);
+  assert.match(sheetXml, /<row r="4">[\s\S]*<c r="A4"><f>Sheet1!A3<\/f><v>2<\/v><\/c>[\s\S]*<\/row>/);
+  assert.match(sheetXml, /<c r="B1"><f>SUM\(A3:B3\)<\/f><v>3<\/v><\/c>/);
+  assert.match(sheetXml, /<mergeCell ref="A3:B4"\/>/);
+  assert.match(sheetXml, /<dimension ref="A1:B4"\/>/);
+});
+
 test("row APIs read sparse rows and write from a column offset", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = await loadFixtureEntries(fixtureDir);

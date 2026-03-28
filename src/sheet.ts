@@ -238,6 +238,38 @@ export class Sheet {
     return parseMergedRanges(this.getSheetIndex().xml);
   }
 
+  insertRow(rowNumber: number, count = 1): void {
+    assertRowNumber(rowNumber);
+    assertInsertCount(count);
+
+    const index = this.getSheetIndex();
+    let nextSheetXml = index.xml;
+    const nextMergedRanges = this.getMergedRanges().map((range) =>
+      shiftRangeRefRows(range, rowNumber, count),
+    );
+
+    for (const sourceRowNumber of [...index.rowNumbers].sort((left, right) => right - left)) {
+      const row = index.rows.get(sourceRowNumber);
+      if (!row) {
+        continue;
+      }
+
+      const nextRowXml = transformRowXml(
+        index.xml,
+        row,
+        this.name,
+        0,
+        0,
+        rowNumber,
+        count,
+      );
+      nextSheetXml = nextSheetXml.slice(0, row.start) + nextRowXml + nextSheetXml.slice(row.end);
+    }
+
+    nextSheetXml = updateMergedRanges(nextSheetXml, nextMergedRanges);
+    this.writeSheetXml(nextSheetXml);
+  }
+
   insertColumn(column: number | string, count = 1): void {
     const columnNumber = normalizeColumnNumber(column);
     assertInsertCount(count);
@@ -254,7 +286,15 @@ export class Sheet {
         continue;
       }
 
-      const nextRowXml = transformRowXml(index.xml, row, columnNumber, count, this.name);
+      const nextRowXml = transformRowXml(
+        index.xml,
+        row,
+        this.name,
+        columnNumber,
+        count,
+        0,
+        0,
+      );
       nextSheetXml = nextSheetXml.slice(0, row.start) + nextRowXml + nextSheetXml.slice(row.end);
     }
 
@@ -719,14 +759,20 @@ function buildFormulaValueXml(value: CellValue): string {
 function transformRowXml(
   sheetXml: string,
   row: LocatedRow,
-  targetColumnNumber: number,
-  count: number,
   sheetName: string,
+  targetColumnNumber: number,
+  columnCount: number,
+  targetRowNumber: number,
+  rowCount: number,
 ): string {
   const rowAttributes = parseAttributes(row.attributesSource);
   const nextRowAttributes = rowAttributes.map(([name, value]) => {
+    if (name === "r") {
+      return [name, String(shiftRowNumber(Number(value), targetRowNumber, rowCount))] as [string, string];
+    }
+
     if (name === "spans") {
-      return [name, shiftRowSpans(value, targetColumnNumber, count)] as [string, string];
+      return [name, shiftRowSpans(value, targetColumnNumber, columnCount)] as [string, string];
     }
 
     return [name, value] as [string, string];
@@ -741,9 +787,11 @@ function transformRowXml(
     nextInnerXml += transformCellXml(
       sheetXml.slice(cell.start, cell.end),
       cell,
-      targetColumnNumber,
-      count,
       sheetName,
+      targetColumnNumber,
+      columnCount,
+      targetRowNumber,
+      rowCount,
     );
     cursor = cell.end;
   }
@@ -755,14 +803,25 @@ function transformRowXml(
 function transformCellXml(
   cellXml: string,
   cell: LocatedCell,
-  targetColumnNumber: number,
-  count: number,
   sheetName: string,
+  targetColumnNumber: number,
+  columnCount: number,
+  targetRowNumber: number,
+  rowCount: number,
 ): string {
   const attributes = parseAttributes(cell.attributesSource);
   const nextAttributes = attributes.map(([name, value]) => {
     if (name === "r") {
-      return [name, shiftCellAddressColumns(value, targetColumnNumber, count)] as [string, string];
+      return [
+        name,
+        shiftCellAddress(
+          value,
+          targetColumnNumber,
+          columnCount,
+          targetRowNumber,
+          rowCount,
+        ),
+      ] as [string, string];
     }
 
     return [name, value] as [string, string];
@@ -781,7 +840,16 @@ function transformCellXml(
     const formulaAttributes = parseAttributes(attributesSource);
     const nextFormulaAttributes = formulaAttributes.map(([name, value]) => {
       if (name === "ref") {
-        return [name, shiftRangeRefColumns(value, targetColumnNumber, count)] as [string, string];
+        return [
+          name,
+          shiftRangeRef(
+            value,
+            targetColumnNumber,
+            columnCount,
+            targetRowNumber,
+            rowCount,
+          ),
+        ] as [string, string];
       }
 
       return [name, value] as [string, string];
@@ -789,9 +857,11 @@ function transformCellXml(
     const serializedAttributes = serializeAttributes(nextFormulaAttributes);
     const shiftedFormula = shiftFormulaReferences(
       decodeXmlText(formulaSource),
-      targetColumnNumber,
-      count,
       sheetName,
+      targetColumnNumber,
+      columnCount,
+      targetRowNumber,
+      rowCount,
     );
 
     return `<f${serializedAttributes ? ` ${serializedAttributes}` : ""}>${escapeXmlText(shiftedFormula)}</f>`;
@@ -1040,21 +1110,63 @@ function numberToColumnLabel(columnNumber: number): string {
   return label;
 }
 
-function shiftCellAddressColumns(address: string, targetColumnNumber: number, count: number): string {
+function shiftCellAddress(
+  address: string,
+  targetColumnNumber: number,
+  columnCount: number,
+  targetRowNumber: number,
+  rowCount: number,
+): string {
   const { rowNumber, columnNumber } = splitCellAddress(address);
-  const nextColumnNumber = columnNumber >= targetColumnNumber ? columnNumber + count : columnNumber;
-  return makeCellAddress(rowNumber, nextColumnNumber);
+  return makeCellAddress(
+    shiftRowNumber(rowNumber, targetRowNumber, rowCount),
+    shiftColumnNumber(columnNumber, targetColumnNumber, columnCount),
+  );
 }
 
-function shiftRangeRefColumns(range: string, targetColumnNumber: number, count: number): string {
+function shiftRangeRef(
+  range: string,
+  targetColumnNumber: number,
+  columnCount: number,
+  targetRowNumber: number,
+  rowCount: number,
+): string {
   const { startRow, endRow, startColumn, endColumn } = parseRangeRef(range);
 
   return formatRangeRef(
-    startRow,
-    startColumn >= targetColumnNumber ? startColumn + count : startColumn,
-    endRow,
-    endColumn >= targetColumnNumber ? endColumn + count : endColumn,
+    shiftRowNumber(startRow, targetRowNumber, rowCount),
+    shiftColumnNumber(startColumn, targetColumnNumber, columnCount),
+    shiftRowNumber(endRow, targetRowNumber, rowCount),
+    shiftColumnNumber(endColumn, targetColumnNumber, columnCount),
   );
+}
+
+function shiftCellAddressColumns(address: string, targetColumnNumber: number, count: number): string {
+  return shiftCellAddress(address, targetColumnNumber, count, 0, 0);
+}
+
+function shiftRangeRefColumns(range: string, targetColumnNumber: number, count: number): string {
+  return shiftRangeRef(range, targetColumnNumber, count, 0, 0);
+}
+
+function shiftRangeRefRows(range: string, targetRowNumber: number, count: number): string {
+  return shiftRangeRef(range, 0, 0, targetRowNumber, count);
+}
+
+function shiftColumnNumber(columnNumber: number, targetColumnNumber: number, count: number): number {
+  if (targetColumnNumber <= 0 || count <= 0) {
+    return columnNumber;
+  }
+
+  return columnNumber >= targetColumnNumber ? columnNumber + count : columnNumber;
+}
+
+function shiftRowNumber(rowNumber: number, targetRowNumber: number, count: number): number {
+  if (targetRowNumber <= 0 || count <= 0) {
+    return rowNumber;
+  }
+
+  return rowNumber >= targetRowNumber ? rowNumber + count : rowNumber;
 }
 
 function shiftRowSpans(spans: string, targetColumnNumber: number, count: number): string {
@@ -1070,9 +1182,11 @@ function shiftRowSpans(spans: string, targetColumnNumber: number, count: number)
 
 function shiftFormulaReferences(
   formula: string,
-  targetColumnNumber: number,
-  count: number,
   currentSheetName: string,
+  targetColumnNumber: number,
+  columnCount: number,
+  targetRowNumber: number,
+  rowCount: number,
 ): string {
   let nextFormula = "";
   let cursor = 0;
@@ -1120,8 +1234,9 @@ function shiftFormulaReferences(
     }
 
     const columnNumber = columnLabelToNumber(columnLabel);
-    const nextColumnNumber = columnNumber >= targetColumnNumber ? columnNumber + count : columnNumber;
-    nextFormula += `${sheetRef ?? ""}${columnDollar}${numberToColumnLabel(nextColumnNumber)}${rowDollar}${rowNumber}`;
+    const nextColumnNumber = shiftColumnNumber(columnNumber, targetColumnNumber, columnCount);
+    const nextRowNumber = shiftRowNumber(Number(rowNumber), targetRowNumber, rowCount);
+    nextFormula += `${sheetRef ?? ""}${columnDollar}${numberToColumnLabel(nextColumnNumber)}${rowDollar}${String(nextRowNumber)}`;
     cursor += fullMatch.length;
   }
 

@@ -73,6 +73,8 @@
 - `sheet.getCell(rowNumber, column)`
 - `sheet.getStyleId(address)`
 - `sheet.getStyleId(rowNumber, column)`
+- `sheet.copyStyle(sourceAddress, targetAddress)`
+- `sheet.copyStyle(sourceRowNumber, sourceColumn, targetRowNumber, targetColumn)`
 - `sheet.getCellEntries()`
 - `sheet.iterCellEntries()`
 - `sheet.rowCount`
@@ -108,6 +110,8 @@
 - `sheet.setCell(rowNumber, column, value)`
 - `sheet.setStyleId(address, styleId)`
 - `sheet.setStyleId(rowNumber, column, styleId)`
+- `sheet.copyStyle(sourceAddress, targetAddress)`
+- `sheet.copyStyle(sourceRowNumber, sourceColumn, targetRowNumber, targetColumn)`
 - `sheet.deleteCell(address)`
 - `sheet.deleteCell(rowNumber, column)`
 - `sheet.deleteRow(row, count?)`
@@ -165,6 +169,7 @@ sheet.setSelection("B2", "B2:C4");
 sheet.setDataValidation("B2:B100", { type: "whole", operator: "between", formula1: "0", formula2: "100" });
 sheet.setCell(3, 2, 98);
 sheet.setStyleId(3, 2, scoreStyleId);
+sheet.copyStyle("B2", "C2");
 sheet.setCell("A1", "Hello");
 sheet.deleteRow(8);
 sheet.deleteColumn("G");
@@ -222,6 +227,7 @@ await workbook.save("output.xlsx");
 - `sheet.getCellEntries()` / `iterCellEntries()` / `getRowEntries()` / `getColumnEntries()` 会按 worksheet 中真实存在的 `<c>` 节点返回带地址、行列号、类型、样式索引和值的对象，适合大表和稀疏表遍历
 - `sheet.deleteCell()` 会真正移除 worksheet 里的 `<c>` 节点；如果你只是想保留样式占位但把值清空，继续用 `setCell(..., null)`
 - `sheet.getStyleId()` / `setStyleId()` 当前读写单元格上的 `s="..."` 样式索引；支持 `A1` 和 `(rowNumber, column)` 两种调用，但还不直接编辑 `styles.xml`
+- `sheet.copyStyle()` 当前会把源单元格的 `styleId` 复制到目标单元格，不会改动目标单元格的值或公式；同样支持地址和 `(rowNumber, column)` 两种调用
 - `sheet.getFreezePane()` / `freezePane()` / `unfreezePane()` 当前维护 worksheet `sheetViews/sheetView/pane`；插删行列时 `topLeftCell` 也会继续跟随更新
 - `sheet.getSelection()` / `setSelection()` 当前读写 worksheet `sheetViews/sheetView/selection`；冻结窗格存在时会优先落在当前 active pane 对应的 selection 上
 - 每次写入后会重建该表索引，保证后续读取拿到的是最新结果

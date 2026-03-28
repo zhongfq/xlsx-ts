@@ -102,6 +102,28 @@ export class Sheet {
     return this.readCellSnapshot(resolveCellAddress(addressOrRowNumber, column)).styleId;
   }
 
+  copyStyle(sourceAddress: string, targetAddress: string): void;
+  copyStyle(
+    sourceRowNumber: number,
+    sourceColumn: number | string,
+    targetRowNumber: number,
+    targetColumn: number | string,
+  ): void;
+  copyStyle(
+    sourceAddressOrRowNumber: string | number,
+    sourceColumnOrTargetAddress: number | string,
+    targetRowNumber?: number,
+    targetColumn?: number | string,
+  ): void {
+    const { sourceAddress, targetAddress } = resolveCopyStyleArguments(
+      sourceAddressOrRowNumber,
+      sourceColumnOrTargetAddress,
+      targetRowNumber,
+      targetColumn,
+    );
+    this.setStyleId(targetAddress, this.getStyleId(sourceAddress));
+  }
+
   rename(name: string): void {
     this.workbook.renameSheet(this.name, name);
   }
@@ -3698,6 +3720,33 @@ function resolveSetStyleId(
     typeof addressOrRowNumber === "number" ? (styleId ?? null) : (columnOrStyleId as number | null);
   assertStyleId(nextStyleId);
   return nextStyleId;
+}
+
+function resolveCopyStyleArguments(
+  sourceAddressOrRowNumber: string | number,
+  sourceColumnOrTargetAddress: number | string,
+  targetRowNumber?: number,
+  targetColumn?: number | string,
+): { sourceAddress: string; targetAddress: string } {
+  if (typeof sourceAddressOrRowNumber === "string") {
+    if (typeof sourceColumnOrTargetAddress !== "string") {
+      throw new XlsxError("Missing target address for copyStyle");
+    }
+
+    return {
+      sourceAddress: resolveCellAddress(sourceAddressOrRowNumber),
+      targetAddress: resolveCellAddress(sourceColumnOrTargetAddress),
+    };
+  }
+
+  if (targetRowNumber === undefined || targetColumn === undefined) {
+    throw new XlsxError("Missing target row or column for copyStyle");
+  }
+
+  return {
+    sourceAddress: resolveCellAddress(sourceAddressOrRowNumber, sourceColumnOrTargetAddress),
+    targetAddress: resolveCellAddress(targetRowNumber, targetColumn),
+  };
 }
 
 function compareRangeRefs(left: string, right: string): number {

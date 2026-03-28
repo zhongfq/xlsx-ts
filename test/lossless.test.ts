@@ -209,6 +209,38 @@ test("style id APIs read and write style indexes by address and indexes", async 
   assert.match(sheetXml, /<c r="C2" s="7"\/>/);
 });
 
+test("copyStyle APIs copy style indexes without changing target values", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" s="1" t="inlineStr"><is><t>Hello</t></is></c>
+      <c r="B1" s="2"><f>SUM(1,2)</f><v>3</v></c>
+      <c r="C1" t="inlineStr"><is><t>Tail</t></is></c>
+    </row>
+  </sheetData>
+</worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.copyStyle("A1", "C1");
+  sheet.copyStyle(1, 2, 2, 1);
+
+  assert.equal(sheet.getStyleId("C1"), 1);
+  assert.equal(sheet.getCell("C1"), "Tail");
+  assert.equal(sheet.getStyleId(2, 1), 2);
+  assert.equal(sheet.getCell("A2"), null);
+
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.match(sheetXml, /<c r="C1" s="1" t="inlineStr"><is><t>Tail<\/t><\/is><\/c>/);
+  assert.match(sheetXml, /<c r="A2" s="2"\/>/);
+});
+
 test("range APIs read and write rectangular values", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = await loadFixtureEntries(fixtureDir);

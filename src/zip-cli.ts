@@ -1,57 +1,34 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+
+import { unzipSync, zipSync } from "fflate";
 
 import type { ArchiveEntry } from "./types.js";
-import { runCommand } from "./utils/exec.js";
 
 export class CliZipAdapter {
   async readArchive(filePath: string): Promise<ArchiveEntry[]> {
-    const listOutput = await runCommand("python3", [
-      "-c",
-      "import sys, zipfile; z = zipfile.ZipFile(sys.argv[1]); sys.stdout.write('\\n'.join(i.filename for i in z.infolist() if not i.is_dir()))",
-      filePath,
-    ]);
-    const entryNames = new TextDecoder()
-      .decode(listOutput)
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0);
+    const archiveData = await readFile(filePath);
+    const entriesByPath = unzipSync(new Uint8Array(archiveData));
 
-    const entries: ArchiveEntry[] = [];
-
-    for (const entryPath of entryNames) {
-      const data = await runCommand("python3", [
-        "-c",
-        "import sys, zipfile; sys.stdout.buffer.write(zipfile.ZipFile(sys.argv[1]).read(sys.argv[2]))",
-        filePath,
-        entryPath,
-      ]);
-      entries.push({ path: entryPath, data });
-    }
-
-    return entries;
+    return Object.keys(entriesByPath)
+      .sort((left, right) => left.localeCompare(right))
+      .map((path) => ({
+        path,
+        data: entriesByPath[path],
+      }));
   }
 
   async writeArchive(filePath: string, entries: ArchiveEntry[]): Promise<void> {
-    const destination = resolve(process.cwd(), filePath);
-    const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-"));
-    const stagingDir = join(tempRoot, "archive");
-
-    await mkdir(stagingDir, { recursive: true });
-
-    try {
-      for (const entry of entries) {
-        const absolutePath = join(stagingDir, entry.path);
-        await mkdir(dirname(absolutePath), { recursive: true });
-        await writeFile(absolutePath, entry.data);
-      }
-
-      await rm(destination, { force: true });
-      await runCommand("zip", ["-X", "-q", "-r", destination, "."], { cwd: stagingDir });
-    } finally {
-      await rm(tempRoot, { recursive: true, force: true });
+    const destinationDirectory = dirname(filePath);
+    if (destinationDirectory !== ".") {
+      await mkdir(destinationDirectory, { recursive: true });
     }
+
+    const zipped = zipSync(
+      Object.fromEntries(entries.map((entry) => [entry.path, new Uint8Array(entry.data)])),
+      { level: 6 },
+    );
+    await writeFile(filePath, zipped);
   }
 
   async readDirectoryEntries(directoryPath: string, root = directoryPath): Promise<ArchiveEntry[]> {

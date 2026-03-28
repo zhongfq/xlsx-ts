@@ -208,7 +208,8 @@ Notes:
 
 ## Current Limits
 
-- The zip backend currently depends on system `python3` and `zip`.
+- The zip backend now uses pure JS via `fflate`, so it no longer depends on system `python3` or `zip`.
+- The full zip package and all entries are still loaded into memory today, so peak memory usage for very large files can still be improved.
 - String writes use `inlineStr` to avoid rebuilding `sharedStrings.xml` for simple value updates.
 - APIs for merged comments, rich text, images, and similar parts are still missing.
 - XML writes are implemented as local patches, not as a full OOXML object model.

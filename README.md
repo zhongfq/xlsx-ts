@@ -203,7 +203,8 @@ await workbook.save("output.xlsx");
 
 ## 当前限制
 
-- zip 读写后端暂时依赖系统里的 `python3` 与 `zip`
+- zip 读写后端现在使用纯 JS 的 `fflate`，不再依赖系统里的 `python3` 与 `zip`
+- 当前仍会把整个 zip 包与各个 entry 一起放进内存，对超大文件的峰值内存还可以继续优化
 - 字符串写入使用 `inlineStr`，避免为了简单写值而重建 `sharedStrings.xml`
 - 合并单元格、批注、富文本、图片等 API 还没加
 - 对 XML 的写入是“局部 patch”，不是完整 OOXML 模型

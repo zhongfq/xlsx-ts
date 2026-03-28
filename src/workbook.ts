@@ -108,6 +108,26 @@ export class Workbook {
     return cloneCellStyleDefinition(this.getStylesCache()?.cellXfs[styleId]?.definition ?? null);
   }
 
+  updateStyle(styleId: number, patch: CellStylePatch): void {
+    assertStyleId(styleId);
+    assertCellStylePatch(patch);
+
+    const styles = this.getStylesCache();
+    if (!styles) {
+      throw new XlsxError("Workbook styles.xml not found");
+    }
+
+    const sourceStyle = styles.cellXfs[styleId];
+    if (!sourceStyle) {
+      throw new XlsxError(`Style not found: ${styleId}`);
+    }
+
+    this.writeEntryText(
+      styles.path,
+      replaceCellXfInStylesXml(styles.xml, styleId, buildPatchedCellXfXml(sourceStyle, patch)),
+    );
+  }
+
   cloneStyle(styleId: number, patch: CellStylePatch = {}): number {
     assertStyleId(styleId);
     assertCellStylePatch(patch);
@@ -125,7 +145,7 @@ export class Workbook {
     const nextStyleId = styles.cellXfs.length;
     this.writeEntryText(
       styles.path,
-      appendCellXfToStylesXml(styles.xml, buildClonedCellXfXml(sourceStyle, patch)),
+      appendCellXfToStylesXml(styles.xml, buildPatchedCellXfXml(sourceStyle, patch)),
     );
     return nextStyleId;
   }
@@ -754,7 +774,39 @@ function appendCellXfToStylesXml(stylesXml: string, xfXml: string): string {
   );
 }
 
-function buildClonedCellXfXml(sourceStyle: ParsedCellStyle, patch: CellStylePatch): string {
+function replaceCellXfInStylesXml(stylesXml: string, styleId: number, xfXml: string): string {
+  const cellXfsMatch = stylesXml.match(/<cellXfs\b([^>]*)>([\s\S]*?)<\/cellXfs>/);
+  if (!cellXfsMatch || cellXfsMatch.index === undefined) {
+    throw new XlsxError("styles.xml is missing <cellXfs>");
+  }
+
+  const innerXml = cellXfsMatch[2];
+  let xfIndex = 0;
+
+  for (const match of innerXml.matchAll(/<xf\b([^>]*?)(?:\/>|>([\s\S]*?)<\/xf>)/g)) {
+    if (xfIndex !== styleId) {
+      xfIndex += 1;
+      continue;
+    }
+
+    if (match.index === undefined) {
+      break;
+    }
+
+    const nextInnerXml =
+      innerXml.slice(0, match.index) + xfXml + innerXml.slice(match.index + match[0].length);
+    const nextCellXfsXml = `<cellXfs${cellXfsMatch[1]}>${nextInnerXml}</cellXfs>`;
+    return (
+      stylesXml.slice(0, cellXfsMatch.index) +
+      nextCellXfsXml +
+      stylesXml.slice(cellXfsMatch.index + cellXfsMatch[0].length)
+    );
+  }
+
+  throw new XlsxError(`Style not found: ${styleId}`);
+}
+
+function buildPatchedCellXfXml(sourceStyle: ParsedCellStyle, patch: CellStylePatch): string {
   const attributes = applyCellStylePatch(sourceStyle.attributes, patch);
   const alignmentAttributes = applyAlignmentPatch(sourceStyle.alignmentAttributes, patch.alignment);
   const alignmentXml = alignmentAttributes ? buildSelfClosingTag("alignment", alignmentAttributes) : "";

@@ -353,6 +353,75 @@ test("style definition APIs read and clone workbook cellXfs", async () => {
   assert.match(sheetXml, /<c r="B2" s="3"\/>/);
 });
 
+test("workbook updateStyle patches existing cellXfs in place", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = await loadFixtureEntries(fixtureDir);
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  workbook.updateStyle(1, {
+    numFmtId: 14,
+    applyNumberFormat: true,
+    applyAlignment: true,
+    alignment: {
+      horizontal: "center",
+      wrapText: true,
+    },
+  });
+
+  assert.deepEqual(workbook.getStyle(1), {
+    numFmtId: 14,
+    fontId: 1,
+    fillId: 0,
+    borderId: 0,
+    xfId: 0,
+    quotePrefix: null,
+    pivotButton: null,
+    applyNumberFormat: true,
+    applyFont: true,
+    applyFill: null,
+    applyBorder: null,
+    applyAlignment: true,
+    applyProtection: null,
+    alignment: {
+      horizontal: "center",
+      wrapText: true,
+    },
+  });
+  assert.equal(sheet.getStyle("A1")?.numFmtId, 14);
+  assert.equal(sheet.getStyle("A1")?.alignment?.horizontal, "center");
+
+  workbook.updateStyle(1, {
+    applyAlignment: null,
+    alignment: null,
+  });
+
+  assert.deepEqual(workbook.getStyle(1), {
+    numFmtId: 14,
+    fontId: 1,
+    fillId: 0,
+    borderId: 0,
+    xfId: 0,
+    quotePrefix: null,
+    pivotButton: null,
+    applyNumberFormat: true,
+    applyFont: true,
+    applyFill: null,
+    applyBorder: null,
+    applyAlignment: null,
+    applyProtection: null,
+    alignment: null,
+  });
+
+  const stylesXml = entryText(workbook.toEntries(), "xl/styles.xml");
+
+  assert.match(stylesXml, /<cellXfs count="2">/);
+  assert.match(
+    stylesXml,
+    /<xf numFmtId="14" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyNumberFormat="1"\/>/,
+  );
+});
+
 test("row style id APIs read and write row-level style indexes", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = replaceEntryText(

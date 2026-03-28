@@ -61,6 +61,7 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `workbook.getSheet(name)`
 - `workbook.getActiveSheet()`
 - `workbook.getStyle(styleId)`
+- `workbook.updateStyle(styleId, patch)`
 - `workbook.cloneStyle(styleId, patch?)`
 - `workbook.getSheetVisibility(name)`
 - `workbook.getDefinedNames()`
@@ -245,7 +246,7 @@ Notes:
 - `sheet.rowCount` and `sheet.columnCount` currently mean the maximum used row number and maximum used column number. Empty sheets return `0`.
 - `sheet.getCellEntries()`, `iterCellEntries()`, `getRowEntries()`, and `getColumnEntries()` expose the real worksheet `<c>` nodes with address, row/column indexes, type, style id, and value, which is useful for large or sparse sheet iteration.
 - `sheet.deleteCell()` removes the worksheet `<c>` node entirely; if you want to keep a styled placeholder but clear the value, continue using `setCell(..., null)`.
-- `workbook.getStyle()` reads `cellXfs` definitions from `styles.xml`, and `workbook.cloneStyle()` appends a new `<xf>` derived from an existing one and returns the new style id.
+- `workbook.getStyle()` reads `cellXfs` definitions from `styles.xml`, `workbook.updateStyle()` patches an existing `<xf>` in place, and `workbook.cloneStyle()` appends a new `<xf>` derived from an existing one and returns the new style id.
 - `sheet.getStyle()` resolves the cell's current style definition; when the cell has no explicit `s="..."`, it falls back to the default style `0`.
 - `sheet.cloneStyle()` clones the current cell style, writes the new definition into `styles.xml`, applies it back to the same cell, and supports both `A1` and `(rowNumber, column)` calls.
 - `sheet.getStyleId()` and `setStyleId()` still only read and write the cell-level `s="..."` style index itself.

@@ -92,6 +92,7 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `sheet.getMergedRanges()`
 - `sheet.getAutoFilter()`
 - `sheet.getFreezePane()`
+- `sheet.getSelection()`
 - `sheet.getDataValidations()`
 - `sheet.getTables()`
 - `sheet.getHyperlinks()`
@@ -102,6 +103,7 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `sheet.setAutoFilter(range)`
 - `sheet.freezePane(columnCount, rowCount?)`
 - `sheet.unfreezePane()`
+- `sheet.setSelection(activeCell, range?)`
 - `sheet.removeAutoFilter()`
 - `sheet.setDataValidation(range, options?)`
 - `sheet.removeDataValidation(range)`
@@ -153,12 +155,13 @@ detailSheet.rename("Detail 2026");
 console.log(sheet.getTables());
 console.log(sheet.getHyperlinks());
 console.log(sheet.rowCount, sheet.columnCount);
-console.log(sheet.getFreezePane(), activeSheet.name);
+console.log(sheet.getFreezePane(), sheet.getSelection(), activeSheet.name);
 sheet.addTable("A1:B10", { name: "Scores" });
 sheet.setHyperlink("A1", "https://example.com", { text: "Hello", tooltip: "Open link" });
 sheet.setHyperlink("B2", "#Summary!A1");
 sheet.setAutoFilter("A1:F20");
 sheet.freezePane(1, 1);
+sheet.setSelection("B2", "B2:C4");
 sheet.setDataValidation("B2:B100", { type: "whole", operator: "between", formula1: "0", formula2: "100" });
 sheet.setCell(3, 2, 98);
 sheet.setCell("A1", "Hello");
@@ -218,6 +221,7 @@ Notes:
 - `sheet.getCellEntries()`, `iterCellEntries()`, `getRowEntries()`, and `getColumnEntries()` expose the real worksheet `<c>` nodes with address, row/column indexes, type, style id, and value, which is useful for large or sparse sheet iteration.
 - `sheet.deleteCell()` removes the worksheet `<c>` node entirely; if you want to keep a styled placeholder but clear the value, continue using `setCell(..., null)`.
 - `sheet.getFreezePane()`, `freezePane()`, and `unfreezePane()` currently manage worksheet `sheetViews/sheetView/pane`; `topLeftCell` keeps tracking row and column insert/delete operations.
+- `sheet.getSelection()` and `setSelection()` currently read and write worksheet `sheetViews/sheetView/selection`; when a frozen pane exists, they target the selection for the current active pane.
 - After each write, the sheet index is rebuilt so later reads always see the latest content.
 - Worksheet edits keep `<dimension ref="...">` in sync so used-range metadata does not go stale.
 - `deleteRow()` and `deleteColumn()` currently update cell coordinates, formulas, merged ranges, worksheet `dimension`, common `ref` and `sqref` attributes, `definedNames`, and explicit formulas in other sheets that reference the edited sheet.

@@ -1405,6 +1405,50 @@ test("sheet freeze pane APIs read, write, shift, and remove pane state", async (
   });
 });
 
+test("sheet selection APIs read, write, and follow frozen active panes", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetViews><sheetView workbookViewId="0"><pane xSplit="1" ySplit="1" topLeftCell="B2" activePane="bottomRight" state="frozen"/><selection pane="topRight"/><selection pane="bottomLeft"/><selection pane="bottomRight" activeCell="B2" sqref="B2"/></sheetView></sheetViews>
+  <sheetData>
+    <row r="1"><c r="A1"><v>1</v></c></row>
+  </sheetData>
+</worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  assert.deepEqual(sheet.getSelection(), {
+    activeCell: "B2",
+    range: "B2",
+    pane: "bottomRight",
+  });
+
+  sheet.setSelection("C3", "C3:D4");
+
+  let sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.match(sheetXml, /<selection pane="bottomRight" activeCell="C3" sqref="C3:D4"\/>/);
+  assert.deepEqual(sheet.getSelection(), {
+    activeCell: "C3",
+    range: "C3:D4",
+    pane: "bottomRight",
+  });
+
+  sheet.unfreezePane();
+  assert.deepEqual(sheet.getSelection(), {
+    activeCell: "C3",
+    range: "C3:D4",
+    pane: null,
+  });
+
+  sheet.setSelection("A1", "A1:B2");
+  sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.match(sheetXml, /<selection activeCell="A1" sqref="A1:B2"\/>/);
+});
+
 test("workbook sheet visibility APIs read and write hidden states", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = replaceEntryText(

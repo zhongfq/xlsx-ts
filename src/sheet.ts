@@ -9,6 +9,7 @@ import type {
   SetDataValidationOptions,
   SetFormulaOptions,
   SetHyperlinkOptions,
+  SheetSelection,
 } from "./types.js";
 import { XlsxError } from "./errors.js";
 import {
@@ -299,6 +300,10 @@ export class Sheet {
     return parseSheetFreezePane(this.getSheetIndex().xml);
   }
 
+  getSelection(): SheetSelection | null {
+    return parseSheetSelection(this.getSheetIndex().xml);
+  }
+
   getDataValidations(): DataValidation[] {
     return parseSheetDataValidations(this.getSheetIndex().xml);
   }
@@ -418,6 +423,20 @@ export class Sheet {
 
   unfreezePane(): void {
     const nextSheetXml = removeFreezePaneFromSheetXml(this.getSheetIndex().xml);
+
+    if (nextSheetXml !== this.getSheetIndex().xml) {
+      this.writeSheetXml(nextSheetXml);
+    }
+  }
+
+  setSelection(activeCell: string, range = activeCell): void {
+    const normalizedActiveCell = normalizeCellAddress(activeCell);
+    const normalizedRange = normalizeSqref(range);
+    const nextSheetXml = upsertSheetSelectionInSheetXml(
+      this.getSheetIndex().xml,
+      normalizedActiveCell,
+      normalizedRange,
+    );
 
     if (nextSheetXml !== this.getSheetIndex().xml) {
       this.writeSheetXml(nextSheetXml);
@@ -2713,6 +2732,22 @@ function parseSheetFreezePane(sheetXml: string): FreezePane | null {
   };
 }
 
+function parseSheetSelection(sheetXml: string): SheetSelection | null {
+  const freezePane = parseSheetFreezePane(sheetXml);
+  const selections = parseSheetSelectionEntries(sheetXml);
+  if (selections.length === 0) {
+    return null;
+  }
+
+  const targetPane = freezePane?.activePane ?? null;
+  const selection =
+    selections.find((candidate) => candidate.pane === targetPane) ??
+    selections.find((candidate) => candidate.activeCell !== null || candidate.range !== null) ??
+    selections[0];
+
+  return selection ?? null;
+}
+
 function upsertFreezePaneInSheetXml(sheetXml: string, columnCount: number, rowCount: number): string {
   const paneXml = buildFreezePaneXml(columnCount, rowCount);
   const selectionsXml = buildFreezePaneSelectionsXml(columnCount, rowCount);
@@ -2794,6 +2829,68 @@ function removeFreezePaneFromSheetXml(sheetXml: string): string {
     .replace(/<pane\b[^>]*\/>/g, "")
     .replace(/<selection\b[^>]*\/>/g, "");
   const nextSheetViewXml = `<sheetView ${serializeAttributes(attributes)}>${nextSelectionXml}${cleanedInnerXml}</sheetView>`;
+  const relativeStart = sheetViewMatch.index;
+  const absoluteStart = sheetViewsMatch.index + sheetViewsMatch[0].indexOf(sheetViewMatch[0], relativeStart);
+
+  return (
+    sheetXml.slice(0, absoluteStart) +
+    nextSheetViewXml +
+    sheetXml.slice(absoluteStart + sheetViewMatch[0].length)
+  );
+}
+
+function upsertSheetSelectionInSheetXml(
+  sheetXml: string,
+  activeCell: string,
+  range: string,
+): string {
+  const freezePane = parseSheetFreezePane(sheetXml);
+  const targetPane = freezePane?.activePane ?? null;
+  const nextSelectionXml = buildSelectionXml([
+    ...(targetPane ? [["pane", targetPane] as [string, string]] : []),
+    ["activeCell", activeCell],
+    ["sqref", range],
+  ]);
+  const sheetViewsMatch = sheetXml.match(/<sheetViews\b[^>]*>([\s\S]*?)<\/sheetViews>/);
+
+  if (!sheetViewsMatch || sheetViewsMatch.index === undefined) {
+    const insertionIndex = findWorksheetChildInsertionIndex(sheetXml, SHEET_VIEWS_FOLLOWING_TAGS);
+    return (
+      sheetXml.slice(0, insertionIndex) +
+      `<sheetViews><sheetView workbookViewId="0">${nextSelectionXml}</sheetView></sheetViews>` +
+      sheetXml.slice(insertionIndex)
+    );
+  }
+
+  const sheetViewMatch = sheetViewsMatch[1].match(/<sheetView\b([^>]*?)(?:\/>|>([\s\S]*?)<\/sheetView>)/);
+  if (!sheetViewMatch || sheetViewMatch.index === undefined) {
+    return (
+      sheetXml.slice(0, sheetViewsMatch.index) +
+      `<sheetViews><sheetView workbookViewId="0">${nextSelectionXml}</sheetView></sheetViews>` +
+      sheetXml.slice(sheetViewsMatch.index + sheetViewsMatch[0].length)
+    );
+  }
+
+  const attributes = parseAttributes(sheetViewMatch[1]);
+  if (!attributes.some(([name]) => name === "workbookViewId")) {
+    attributes.push(["workbookViewId", "0"]);
+  }
+
+  const innerXml = sheetViewMatch[2] ?? "";
+  let replaced = false;
+  const nextInnerXml =
+    innerXml.replace(/<selection\b([^>]*?)\/>/g, (match, attributesSource) => {
+      const selectionPane = normalizePaneName(getXmlAttr(attributesSource, "pane"));
+      const matchesTargetPane = selectionPane === targetPane;
+
+      if (matchesTargetPane || (!replaced && targetPane === null && selectionPane === null)) {
+        replaced = true;
+        return nextSelectionXml;
+      }
+
+      return match;
+    }) + (!replaced ? nextSelectionXml : "");
+  const nextSheetViewXml = `<sheetView ${serializeAttributes(attributes)}>${nextInnerXml}</sheetView>`;
   const relativeStart = sheetViewMatch.index;
   const absoluteStart = sheetViewsMatch.index + sheetViewsMatch[0].indexOf(sheetViewMatch[0], relativeStart);
 
@@ -3415,6 +3512,20 @@ function buildFreezePaneSelectionsXml(columnCount: number, rowCount: number): st
   }
 
   return buildSelectionXml([["pane", "bottomLeft"], ["activeCell", topLeftCell], ["sqref", topLeftCell]]);
+}
+
+function parseSheetSelectionEntries(sheetXml: string): SheetSelection[] {
+  return Array.from(sheetXml.matchAll(/<selection\b([^>]*?)\/>/g), (match) => {
+    const attributesSource = match[1];
+    const activeCell = getXmlAttr(attributesSource, "activeCell");
+    const sqref = getXmlAttr(attributesSource, "sqref");
+
+    return {
+      activeCell: activeCell ? normalizeCellAddress(activeCell) : null,
+      range: sqref ? normalizeSqref(sqref) : null,
+      pane: normalizePaneName(getXmlAttr(attributesSource, "pane")),
+    };
+  });
 }
 
 function buildSelectionXml(attributes: Array<[string, string]>): string {

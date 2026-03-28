@@ -87,6 +87,7 @@
 - `sheet.getMergedRanges()`
 - `sheet.getAutoFilter()`
 - `sheet.getFreezePane()`
+- `sheet.getSelection()`
 - `sheet.getDataValidations()`
 - `sheet.getTables()`
 - `sheet.getHyperlinks()`
@@ -97,6 +98,7 @@
 - `sheet.setAutoFilter(range)`
 - `sheet.freezePane(columnCount, rowCount?)`
 - `sheet.unfreezePane()`
+- `sheet.setSelection(activeCell, range?)`
 - `sheet.removeAutoFilter()`
 - `sheet.setDataValidation(range, options?)`
 - `sheet.removeDataValidation(range)`
@@ -148,12 +150,13 @@ detailSheet.rename("Detail 2026");
 console.log(sheet.getTables());
 console.log(sheet.getHyperlinks());
 console.log(sheet.rowCount, sheet.columnCount);
-console.log(sheet.getFreezePane(), activeSheet.name);
+console.log(sheet.getFreezePane(), sheet.getSelection(), activeSheet.name);
 sheet.addTable("A1:B10", { name: "Scores" });
 sheet.setHyperlink("A1", "https://example.com", { text: "Hello", tooltip: "Open link" });
 sheet.setHyperlink("B2", "#Summary!A1");
 sheet.setAutoFilter("A1:F20");
 sheet.freezePane(1, 1);
+sheet.setSelection("B2", "B2:C4");
 sheet.setDataValidation("B2:B100", { type: "whole", operator: "between", formula1: "0", formula2: "100" });
 sheet.setCell(3, 2, 98);
 sheet.setCell("A1", "Hello");
@@ -213,6 +216,7 @@ await workbook.save("output.xlsx");
 - `sheet.getCellEntries()` / `iterCellEntries()` / `getRowEntries()` / `getColumnEntries()` 会按 worksheet 中真实存在的 `<c>` 节点返回带地址、行列号、类型、样式索引和值的对象，适合大表和稀疏表遍历
 - `sheet.deleteCell()` 会真正移除 worksheet 里的 `<c>` 节点；如果你只是想保留样式占位但把值清空，继续用 `setCell(..., null)`
 - `sheet.getFreezePane()` / `freezePane()` / `unfreezePane()` 当前维护 worksheet `sheetViews/sheetView/pane`；插删行列时 `topLeftCell` 也会继续跟随更新
+- `sheet.getSelection()` / `setSelection()` 当前读写 worksheet `sheetViews/sheetView/selection`；冻结窗格存在时会优先落在当前 active pane 对应的 selection 上
 - 每次写入后会重建该表索引，保证后续读取拿到的是最新结果
 - 修改工作表后会同步维护 `<dimension ref="...">`，避免使用范围信息过期
 - `deleteRow()` / `deleteColumn()` 当前会同步更新本 sheet 的单元格坐标、公式引用、合并区域、`dimension`、常见 `ref/sqref` 属性、`definedNames`，以及其它 sheet 里显式引用它的公式

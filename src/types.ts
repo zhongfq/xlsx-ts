@@ -43,6 +43,12 @@ export interface FreezePane {
   activePane: "bottomLeft" | "topRight" | "bottomRight" | null;
 }
 
+export interface SheetSelection {
+  activeCell: string | null;
+  range: string | null;
+  pane: "bottomLeft" | "topRight" | "bottomRight" | null;
+}
+
 export interface DataValidation {
   range: string;
   type: string | null;

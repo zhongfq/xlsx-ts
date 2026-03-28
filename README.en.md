@@ -65,6 +65,7 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `workbook.setDefinedName(name, value, options?)`
 - `workbook.deleteDefinedName(name, scope?)`
 - `workbook.renameSheet(currentName, nextName)`
+- `workbook.moveSheet(name, targetIndex)`
 - `workbook.addSheet(name)`
 - `workbook.deleteSheet(name)`
 - `workbook.setSheetVisibility(name, visibility)`
@@ -139,6 +140,7 @@ const detailSheet = workbook.addSheet("Detail");
 workbook.setDefinedName("Scores", "Summary!$A$1:$B$10");
 workbook.setDefinedName("LocalScore", "$B$2", { scope: "Summary" });
 workbook.renameSheet("Sheet1", "Summary");
+workbook.moveSheet("Summary", 0);
 workbook.setSheetVisibility("Summary", "hidden");
 detailSheet.rename("Detail 2026");
 console.log(sheet.getTables());
@@ -221,6 +223,7 @@ Notes:
 - `workbook.getDefinedNames()`, `getDefinedName()`, `setDefinedName()`, and `deleteDefinedName()` currently support both global and local defined names.
 - `workbook.getSheetVisibility()` and `setSheetVisibility()` currently support `visible`, `hidden`, and `veryHidden`, and prevent hiding the last visible sheet in the workbook.
 - `workbook.renameSheet()` and `sheet.rename()` currently update sheet names, explicit formula references in other sheets, `definedNames`, internal hyperlink locations, and document properties.
+- `workbook.moveSheet()` currently uses a 0-based `targetIndex` and keeps workbook `<sheets>` order, worksheet order in `docProps/app.xml`, local defined-name `localSheetId` values, and `workbookView.activeTab` aligned.
 - `workbook.addSheet()` and `workbook.deleteSheet()` currently maintain `workbook.xml`, workbook rels, and `[Content_Types].xml`, and adjust remaining formulas and `definedNames` when a sheet is deleted.
 
 ## Benchmarking

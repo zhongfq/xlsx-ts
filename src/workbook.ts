@@ -219,6 +219,32 @@ export class Workbook {
     return renamedSheet;
   }
 
+  moveSheet(sheetName: string, targetIndex: number): Sheet {
+    const context = this.getWorkbookContext();
+    const sourceIndex = context.sheets.findIndex((sheet) => sheet.name === sheetName);
+    if (sourceIndex === -1) {
+      throw new XlsxError(`Sheet not found: ${sheetName}`);
+    }
+
+    assertSheetIndex(targetIndex, context.sheets.length);
+    if (sourceIndex === targetIndex) {
+      return context.sheets[sourceIndex]!;
+    }
+
+    const nextSheets = [...context.sheets];
+    const [movedSheet] = nextSheets.splice(sourceIndex, 1);
+    nextSheets.splice(targetIndex, 0, movedSheet!);
+
+    const workbookPath = context.workbookPath;
+    const workbookXml = this.readEntryText(workbookPath);
+    this.writeEntryText(
+      workbookPath,
+      reorderWorkbookXmlSheets(workbookXml, context.sheets, nextSheets),
+    );
+    this.rewriteAppSheetNames(nextSheets.map((sheet) => sheet.name));
+    return this.getSheet(sheetName);
+  }
+
   addSheet(sheetName: string): Sheet {
     assertSheetName(sheetName);
 
@@ -562,6 +588,12 @@ function assertSheetVisibility(visibility: string): asserts visibility is SheetV
   }
 }
 
+function assertSheetIndex(sheetIndex: number, sheetCount: number): void {
+  if (!Number.isInteger(sheetIndex) || sheetIndex < 0 || sheetIndex >= sheetCount) {
+    throw new XlsxError(`Invalid sheet index: ${sheetIndex}`);
+  }
+}
+
 function buildEmptyWorksheetXml(): string {
   return (
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
@@ -653,6 +685,106 @@ function renameSheetInWorkbookXml(
         : `<definedName${attributesSource}>${escapeXmlText(nextNameText)}</definedName>`;
     },
   );
+}
+
+function reorderWorkbookXmlSheets(
+  workbookXml: string,
+  currentSheets: Sheet[],
+  nextSheets: Sheet[],
+): string {
+  const sheetsMatch = workbookXml.match(/<sheets>([\s\S]*?)<\/sheets>/);
+  if (!sheetsMatch) {
+    throw new XlsxError("Workbook is missing <sheets>");
+  }
+
+  const sheetNodes = new Map<string, string>();
+  for (const match of sheetsMatch[1].matchAll(/<sheet\b[^>]*\/>/g)) {
+    const sheetXml = match[0];
+    const relationshipId = getXmlAttr(sheetXml, "r:id");
+    if (relationshipId) {
+      sheetNodes.set(relationshipId, sheetXml);
+    }
+  }
+
+  const reorderedSheetsXml = nextSheets
+    .map((sheet) => {
+      const sheetXml = sheetNodes.get(sheet.relationshipId);
+      if (!sheetXml) {
+        throw new XlsxError(`Sheet relationship not found: ${sheet.relationshipId}`);
+      }
+
+      return sheetXml;
+    })
+    .join("");
+  const localSheetIdMap = buildLocalSheetIdMap(currentSheets, nextSheets);
+
+  return workbookXml
+    .replace(/<sheets>[\s\S]*?<\/sheets>/, `<sheets>${reorderedSheetsXml}</sheets>`)
+    .replace(
+      /<definedName\b([^>]*)>([\s\S]*?)<\/definedName>/g,
+      (match, attributesSource, nameSource) => {
+        const attributes = parseAttributes(attributesSource);
+        const localSheetIdIndex = attributes.findIndex(([name]) => name === "localSheetId");
+        if (localSheetIdIndex === -1) {
+          return match;
+        }
+
+        const localSheetIdText = attributes[localSheetIdIndex]?.[1];
+        if (localSheetIdText === undefined) {
+          return match;
+        }
+
+        const nextLocalSheetId = localSheetIdMap.get(Number(localSheetIdText));
+        if (nextLocalSheetId === undefined) {
+          return match;
+        }
+
+        attributes[localSheetIdIndex] = ["localSheetId", String(nextLocalSheetId)];
+        const serializedAttributes = serializeAttributes(attributes);
+        return `<definedName${serializedAttributes ? ` ${serializedAttributes}` : ""}>${nameSource}</definedName>`;
+      },
+    )
+    .replace(
+      /<workbookView\b([^>]*?)\/>/g,
+      (match, attributesSource) => {
+        const attributes = parseAttributes(attributesSource);
+        const activeTabIndex = attributes.findIndex(([name]) => name === "activeTab");
+        if (activeTabIndex === -1) {
+          return match;
+        }
+
+        const activeTabText = attributes[activeTabIndex]?.[1];
+        if (activeTabText === undefined) {
+          return match;
+        }
+
+        const nextActiveTab = localSheetIdMap.get(Number(activeTabText));
+        if (nextActiveTab === undefined) {
+          return match;
+        }
+
+        attributes[activeTabIndex] = ["activeTab", String(nextActiveTab)];
+        const serializedAttributes = serializeAttributes(attributes);
+        return `<workbookView${serializedAttributes ? ` ${serializedAttributes}` : ""}/>`;
+      },
+    );
+}
+
+function buildLocalSheetIdMap(currentSheets: Sheet[], nextSheets: Sheet[]): Map<number, number> {
+  const nextIndexesByRelationshipId = new Map<string, number>();
+  nextSheets.forEach((sheet, index) => {
+    nextIndexesByRelationshipId.set(sheet.relationshipId, index);
+  });
+
+  const localSheetIdMap = new Map<number, number>();
+  currentSheets.forEach((sheet, index) => {
+    const nextIndex = nextIndexesByRelationshipId.get(sheet.relationshipId);
+    if (nextIndex !== undefined) {
+      localSheetIdMap.set(index, nextIndex);
+    }
+  });
+
+  return localSheetIdMap;
 }
 
 function parseSheetVisibility(workbookXml: string, relationshipId: string): SheetVisibility {

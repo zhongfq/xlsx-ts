@@ -1208,6 +1208,88 @@ test("workbook can delete a sheet and rewrite remaining references", async () =>
   assert.doesNotMatch(appXml, /Sheet2/);
 });
 
+test("workbook can move a sheet and remap local sheet scopes", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    replaceEntryText(
+      replaceEntryText(
+        withSecondSheet(
+          await loadFixtureEntries(fixtureDir),
+          `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1"><v>2</v></c></row>
+  </sheetData>
+</worksheet>`,
+        ),
+        "xl/workbook.xml",
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <bookViews><workbookView activeTab="1"/></bookViews>
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+    <sheet name="Sheet2" sheetId="2" r:id="rId3"/>
+    <sheet name="Sheet3" sheetId="3" r:id="rId4"/>
+  </sheets>
+  <definedNames>
+    <definedName name="LocalToSheet1" localSheetId="0">$A$1</definedName>
+    <definedName name="LocalToSheet2" localSheetId="1">$A$1</definedName>
+    <definedName name="LocalToSheet3" localSheetId="2">$A$1</definedName>
+  </definedNames>
+</workbook>`,
+      ),
+      "xl/_rels/workbook.xml.rels",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>
+  <Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet3.xml"/>
+</Relationships>`,
+    ),
+    "docProps/app.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
+  <Application>xlsx-ts</Application>
+  <HeadingPairs><vt:vector size="2" baseType="variant"><vt:variant><vt:lpstr>Worksheets</vt:lpstr></vt:variant><vt:variant><vt:i4>3</vt:i4></vt:variant></vt:vector></HeadingPairs>
+  <TitlesOfParts><vt:vector size="3" baseType="lpstr"><vt:lpstr>Sheet1</vt:lpstr><vt:lpstr>Sheet2</vt:lpstr><vt:lpstr>Sheet3</vt:lpstr></vt:vector></TitlesOfParts>
+</Properties>`,
+  );
+  const withThirdSheet = [
+    ...entries,
+    {
+      path: "xl/worksheets/sheet3.xml",
+      data: new TextEncoder().encode(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1"><v>3</v></c></row>
+  </sheetData>
+</worksheet>`),
+    },
+  ].sort((left, right) => left.path.localeCompare(right.path));
+  const workbook = Workbook.fromEntries(withThirdSheet);
+
+  workbook.moveSheet("Sheet3", 0);
+
+  assert.deepEqual(workbook.getSheets().map((sheet) => sheet.name), ["Sheet3", "Sheet1", "Sheet2"]);
+  assert.equal(workbook.getDefinedName("LocalToSheet1", "Sheet1"), "$A$1");
+  assert.equal(workbook.getDefinedName("LocalToSheet2", "Sheet2"), "$A$1");
+  assert.equal(workbook.getDefinedName("LocalToSheet3", "Sheet3"), "$A$1");
+
+  const workbookXml = entryText(workbook.toEntries(), "xl/workbook.xml");
+  const appXml = entryText(workbook.toEntries(), "docProps/app.xml");
+
+  assert.match(
+    workbookXml,
+    /<sheets><sheet name="Sheet3" sheetId="3" r:id="rId4"\/><sheet name="Sheet1" sheetId="1" r:id="rId1"\/><sheet name="Sheet2" sheetId="2" r:id="rId3"\/><\/sheets>/,
+  );
+  assert.match(workbookXml, /<workbookView activeTab="2"\/>/);
+  assert.match(workbookXml, /<definedName name="LocalToSheet1" localSheetId="1">\$A\$1<\/definedName>/);
+  assert.match(workbookXml, /<definedName name="LocalToSheet2" localSheetId="2">\$A\$1<\/definedName>/);
+  assert.match(workbookXml, /<definedName name="LocalToSheet3" localSheetId="0">\$A\$1<\/definedName>/);
+  assert.match(appXml, /<vt:lpstr>Sheet3<\/vt:lpstr><vt:lpstr>Sheet1<\/vt:lpstr><vt:lpstr>Sheet2<\/vt:lpstr>/);
+});
+
 test("workbook sheet visibility APIs read and write hidden states", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = replaceEntryText(

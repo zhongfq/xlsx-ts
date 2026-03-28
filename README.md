@@ -60,6 +60,7 @@
 - `workbook.setDefinedName(name, value, options?)`
 - `workbook.deleteDefinedName(name, scope?)`
 - `workbook.renameSheet(currentName, nextName)`
+- `workbook.moveSheet(name, targetIndex)`
 - `workbook.addSheet(name)`
 - `workbook.deleteSheet(name)`
 - `workbook.setSheetVisibility(name, visibility)`
@@ -134,6 +135,7 @@ const detailSheet = workbook.addSheet("Detail");
 workbook.setDefinedName("Scores", "Summary!$A$1:$B$10");
 workbook.setDefinedName("LocalScore", "$B$2", { scope: "Summary" });
 workbook.renameSheet("Sheet1", "Summary");
+workbook.moveSheet("Summary", 0);
 workbook.setSheetVisibility("Summary", "hidden");
 detailSheet.rename("Detail 2026");
 console.log(sheet.getTables());
@@ -216,6 +218,7 @@ await workbook.save("output.xlsx");
 - `workbook.getDefinedNames()` / `getDefinedName()` / `setDefinedName()` / `deleteDefinedName()` 当前支持读写全局和本地 `definedNames`
 - `workbook.getSheetVisibility()` / `setSheetVisibility()` 当前支持 `visible` / `hidden` / `veryHidden`；并会阻止把最后一张可见 sheet 隐藏掉
 - `workbook.renameSheet()` / `sheet.rename()` 当前会同步维护 sheet 名、其它 sheet 的显式公式引用、`definedNames`、内部超链接位置和文档属性
+- `workbook.moveSheet()` 当前使用 0-based `targetIndex`，会同步维护 workbook 里的 `<sheets>` 顺序、`docProps/app.xml` 里的工作表顺序、本地 `definedNames` 的 `localSheetId`，以及 `workbookView.activeTab`
 - `workbook.addSheet()` / `workbook.deleteSheet()` 当前会同步维护 `workbook.xml`、rels、`[Content_Types].xml`，并在删除 sheet 时修正剩余公式与 `definedNames`
 
 ## 基准测试

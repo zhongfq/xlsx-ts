@@ -103,6 +103,22 @@ npm run cli -- validate path/to/file.xlsx
 
 Use validation whenever the user cares about style preservation, untouched workbook parts, or safe config updates.
 
+## Use `table` For Structured Sheets
+
+When a sheet has explicit header rows, metadata rows, and a later data section, prefer the `table` command group.
+
+Examples:
+
+```bash
+npm run cli -- table inspect path/to/file.xlsx --sheet main --header-row 1 --data-start-row 6
+npm run cli -- table list path/to/file.xlsx --sheet main --header-row 1 --data-start-row 6
+npm run cli -- table get path/to/file.xlsx --sheet main --header-row 1 --data-start-row 6 --key-field id --key 1001
+npm run cli -- table upsert path/to/file.xlsx --sheet main --header-row 1 --data-start-row 6 --key-field id --record '{"id":1001,"desc":"..."}' --in-place
+npm run cli -- table sync path/to/file.xlsx --sheet main --header-row 1 --data-start-row 6 --key-field id --from-json main.json --in-place
+```
+
+Use this command group when rows between the header row and data rows must be preserved as-is.
+
 ## Use The Record Commands For Config Tables
 
 When a sheet behaves like a config table with headers in row 1, prefer the record commands over manual cell-by-cell edits.

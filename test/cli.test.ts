@@ -436,6 +436,130 @@ test("config-table sync imports JSON config objects in replace and upsert modes"
   }
 });
 
+test("table command group respects explicit data row boundaries", async () => {
+  const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-cli-test-"));
+
+  try {
+    const inputPath = await writeStructuredTableWorkbook(tempRoot);
+    const upsertedPath = join(tempRoot, "table-upsert.xlsx");
+    const syncJsonPath = join(tempRoot, "table-sync.json");
+    const syncedPath = join(tempRoot, "table-sync.xlsx");
+
+    let result = await runCliCapture([
+      "table",
+      "inspect",
+      inputPath,
+      "--sheet",
+      "Sheet1",
+      "--header-row",
+      "1",
+      "--data-start-row",
+      "6",
+    ]);
+    assert.equal(result.exitCode, 0);
+    assert.equal(JSON.parse(result.stdout).dataRowCount, 2);
+
+    result = await runCliCapture([
+      "table",
+      "get",
+      inputPath,
+      "--sheet",
+      "Sheet1",
+      "--header-row",
+      "1",
+      "--data-start-row",
+      "6",
+      "--key-field",
+      "id",
+      "--key",
+      "1001",
+    ]);
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout).row, {
+      row: 6,
+      record: { id: 1001, name: "Alpha" },
+    });
+
+    result = await runCliCapture([
+      "table",
+      "upsert",
+      inputPath,
+      "--sheet",
+      "Sheet1",
+      "--header-row",
+      "1",
+      "--data-start-row",
+      "6",
+      "--key-field",
+      "id",
+      "--record",
+      '{"id":1002,"name":"Beta-2"}',
+      "--output",
+      upsertedPath,
+    ]);
+    assert.equal(result.exitCode, 0);
+
+    await writeFile(
+      syncJsonPath,
+      JSON.stringify(
+        [
+          { id: 1001, name: "Alpha-2" },
+          { id: 1003, name: "Gamma" },
+        ],
+        null,
+        2,
+      ),
+    );
+
+    result = await runCliCapture([
+      "table",
+      "sync",
+      upsertedPath,
+      "--sheet",
+      "Sheet1",
+      "--header-row",
+      "1",
+      "--data-start-row",
+      "6",
+      "--key-field",
+      "id",
+      "--from-json",
+      syncJsonPath,
+      "--output",
+      syncedPath,
+    ]);
+    assert.equal(result.exitCode, 0);
+
+    result = await runCliCapture([
+      "table",
+      "list",
+      syncedPath,
+      "--sheet",
+      "Sheet1",
+      "--header-row",
+      "1",
+      "--data-start-row",
+      "6",
+    ]);
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout).rows, [
+      { row: 6, record: { id: 1001, name: "Alpha-2" } },
+      { row: 7, record: { id: 1003, name: "Gamma" } },
+    ]);
+
+    const workbook = await Workbook.open(syncedPath);
+    const sheet = workbook.getSheet("Sheet1");
+    assert.deepEqual(sheet.getRow(2), ["int", "string"]);
+    assert.deepEqual(sheet.getRow(3), [">>", "client"]);
+    assert.deepEqual(sheet.getRow(4), ["!!!", "x"]);
+    assert.deepEqual(sheet.getRow(5), ["###", "display"]);
+    assert.deepEqual(sheet.getRecord(6, 1), { id: 1001, name: "Alpha-2" });
+    assert.deepEqual(sheet.getRecord(7, 1), { id: 1003, name: "Gamma" });
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("style commands update formatting and can copy styles through the CLI", async () => {
   const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-cli-test-"));
 
@@ -694,6 +818,23 @@ async function writeFixtureWorkbook(rootDirectory: string): Promise<string> {
   const entries = await loadFixtureEntries(fixtureDir);
   const workbook = Workbook.fromEntries(entries);
   const inputPath = join(rootDirectory, "input.xlsx");
+  await workbook.save(inputPath);
+  return inputPath;
+}
+
+async function writeStructuredTableWorkbook(rootDirectory: string): Promise<string> {
+  const inputPath = await writeFixtureWorkbook(rootDirectory);
+  const workbook = await Workbook.open(inputPath);
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.setRow(1, ["id", "name"]);
+  sheet.setRow(2, ["int", "string"]);
+  sheet.setRow(3, [">>", "client"]);
+  sheet.setRow(4, ["!!!", "x"]);
+  sheet.setRow(5, ["###", "display"]);
+  sheet.setRow(6, [1001, "Alpha"]);
+  sheet.setRow(7, [1002, "Beta"]);
+
   await workbook.save(inputPath);
   return inputPath;
 }

@@ -51,6 +51,10 @@ type ConfigTableRow = {
   record: CellRecord;
   row: number;
 };
+type StructuredTableRow = {
+  record: CellRecord;
+  row: number;
+};
 type ConfigTableSyncMode = "replace" | "upsert";
 
 type WorkbookOperation =
@@ -554,6 +558,290 @@ function createProgram(io: Required<CliIo>): Command {
           mode: options.mode,
           output: outputPath,
           rows: (await getConfigTableRows(outputPath, options.sheet, options.headerRow)).rows,
+          sheet: options.sheet,
+          source: jsonPath,
+        });
+      },
+    );
+
+  const table = program
+    .command("table")
+    .description("Operate on structured sheets with explicit header and data row boundaries");
+
+  table
+    .command("inspect")
+    .argument("<file>", "input xlsx file")
+    .requiredOption("--sheet <name>", "sheet name")
+    .requiredOption("--header-row <row>", "row number containing field names", parsePositiveInteger)
+    .requiredOption("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
+    .action(
+      async (
+        file: string,
+        options: {
+          dataStartRow: number;
+          headerRow: number;
+          sheet: string;
+        },
+      ) => {
+        const result = await inspectTable(
+          resolveFrom(io.cwd, file),
+          options.sheet,
+          options.headerRow,
+          options.dataStartRow,
+        );
+        writeJson(io.stdout, result);
+      },
+    );
+
+  table
+    .command("list")
+    .argument("<file>", "input xlsx file")
+    .requiredOption("--sheet <name>", "sheet name")
+    .requiredOption("--header-row <row>", "row number containing field names", parsePositiveInteger)
+    .requiredOption("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
+    .action(
+      async (
+        file: string,
+        options: {
+          dataStartRow: number;
+          headerRow: number;
+          sheet: string;
+        },
+      ) => {
+        const result = await getStructuredTableRows(
+          resolveFrom(io.cwd, file),
+          options.sheet,
+          options.headerRow,
+          options.dataStartRow,
+        );
+        writeJson(io.stdout, result);
+      },
+    );
+
+  table
+    .command("get")
+    .argument("<file>", "input xlsx file")
+    .requiredOption("--sheet <name>", "sheet name")
+    .requiredOption("--header-row <row>", "row number containing field names", parsePositiveInteger)
+    .requiredOption("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
+    .requiredOption("--key <json>", "JSON scalar or object used to locate the row")
+    .option("--key-field <name>", "key field name", collectRepeatedStrings, [])
+    .action(
+      async (
+        file: string,
+        options: {
+          dataStartRow: number;
+          headerRow: number;
+          key: string;
+          keyField: string[];
+          sheet: string;
+        },
+      ) => {
+        const result = await getStructuredTableRecord(
+          resolveFrom(io.cwd, file),
+          options.sheet,
+          options.headerRow,
+          options.dataStartRow,
+          options.keyField,
+          options.key,
+        );
+        writeJson(io.stdout, result);
+      },
+    );
+
+  table
+    .command("upsert")
+    .argument("<file>", "input xlsx file")
+    .requiredOption("--sheet <name>", "sheet name")
+    .requiredOption("--header-row <row>", "row number containing field names", parsePositiveInteger)
+    .requiredOption("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
+    .requiredOption("--record <json>", "JSON object keyed by field names")
+    .option("--key-field <name>", "key field name", collectRepeatedStrings, [])
+    .option("--output <file>", "output xlsx path")
+    .option("--in-place", "overwrite the input workbook")
+    .action(
+      async (
+        file: string,
+        options: {
+          dataStartRow: number;
+          headerRow: number;
+          inPlace?: boolean;
+          keyField: string[];
+          output?: string;
+          record: string;
+          sheet: string;
+        },
+      ) => {
+        const inputPath = resolveFrom(io.cwd, file);
+        const outputPath = resolveOutputPath(inputPath, {
+          inPlace: options.inPlace === true,
+          output: options.output ? resolveFrom(io.cwd, options.output) : undefined,
+        });
+        const workbook = await Workbook.open(inputPath);
+        const sheet = workbook.getSheet(options.sheet);
+        const record = parseJsonCellRecord(options.record, "--record");
+        const keyFields = resolveTableKeyFields(sheet, options.headerRow, options.keyField);
+        const keyRecord = pickKeyRecord(record, keyFields);
+        const matchedRow =
+          findStructuredTableRow(sheet, options.headerRow, options.dataStartRow, keyFields, keyRecord)?.row ?? null;
+
+        if (matchedRow === null) {
+          sheet.addRecord(record, options.headerRow);
+        } else {
+          writeStructuredTableRecord(sheet, options.headerRow, matchedRow, record);
+        }
+
+        await workbook.save(outputPath);
+        writeJson(io.stdout, {
+          action: "table.upsert",
+          dataStartRow: options.dataStartRow,
+          headerRow: options.headerRow,
+          input: inputPath,
+          keyFields,
+          output: outputPath,
+          record,
+          rows: (await getStructuredTableRows(outputPath, options.sheet, options.headerRow, options.dataStartRow)).rows,
+          sheet: options.sheet,
+        });
+      },
+    );
+
+  table
+    .command("delete")
+    .argument("<file>", "input xlsx file")
+    .requiredOption("--sheet <name>", "sheet name")
+    .requiredOption("--header-row <row>", "row number containing field names", parsePositiveInteger)
+    .requiredOption("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
+    .requiredOption("--key <json>", "JSON scalar or object used to locate the row")
+    .option("--key-field <name>", "key field name", collectRepeatedStrings, [])
+    .option("--output <file>", "output xlsx path")
+    .option("--in-place", "overwrite the input workbook")
+    .action(
+      async (
+        file: string,
+        options: {
+          dataStartRow: number;
+          headerRow: number;
+          inPlace?: boolean;
+          key: string;
+          keyField: string[];
+          output?: string;
+          sheet: string;
+        },
+      ) => {
+        const inputPath = resolveFrom(io.cwd, file);
+        const outputPath = resolveOutputPath(inputPath, {
+          inPlace: options.inPlace === true,
+          output: options.output ? resolveFrom(io.cwd, options.output) : undefined,
+        });
+        const workbook = await Workbook.open(inputPath);
+        const sheet = workbook.getSheet(options.sheet);
+        const keyFields = resolveTableKeyFields(sheet, options.headerRow, options.keyField);
+        const keyRecord = parseTableKey(options.key, keyFields, "--key");
+        const row =
+          findStructuredTableRow(sheet, options.headerRow, options.dataStartRow, keyFields, keyRecord)?.row ?? null;
+
+        if (row !== null) {
+          sheet.deleteRecord(row, options.headerRow);
+        }
+
+        await workbook.save(outputPath);
+        writeJson(io.stdout, {
+          action: "table.delete",
+          dataStartRow: options.dataStartRow,
+          deleted: row !== null,
+          headerRow: options.headerRow,
+          input: inputPath,
+          key: keyRecord,
+          keyFields,
+          output: outputPath,
+          row,
+          rows: (await getStructuredTableRows(outputPath, options.sheet, options.headerRow, options.dataStartRow)).rows,
+          sheet: options.sheet,
+        });
+      },
+    );
+
+  table
+    .command("sync")
+    .argument("<file>", "input xlsx file")
+    .requiredOption("--sheet <name>", "sheet name")
+    .requiredOption("--header-row <row>", "row number containing field names", parsePositiveInteger)
+    .requiredOption("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
+    .requiredOption("--from-json <file>", "JSON file containing records or a config object")
+    .option("--key-field <name>", "key field name", collectRepeatedStrings, [])
+    .option("--value-field <name>", "field name used when normalizing scalar config objects", "Value")
+    .option("--headers <json>", "JSON array of header strings")
+    .option("--mode <mode>", "sync mode: replace or upsert", parseConfigTableSyncMode, "replace")
+    .option("--output <file>", "output xlsx path")
+    .option("--in-place", "overwrite the input workbook")
+    .action(
+      async (
+        file: string,
+        options: {
+          dataStartRow: number;
+          fromJson: string;
+          headerRow: number;
+          headers?: string;
+          inPlace?: boolean;
+          keyField: string[];
+          mode: ConfigTableSyncMode;
+          output?: string;
+          sheet: string;
+          valueField: string;
+        },
+      ) => {
+        const inputPath = resolveFrom(io.cwd, file);
+        const jsonPath = resolveFrom(io.cwd, options.fromJson);
+        const outputPath = resolveOutputPath(inputPath, {
+          inPlace: options.inPlace === true,
+          output: options.output ? resolveFrom(io.cwd, options.output) : undefined,
+        });
+        const workbook = await Workbook.open(inputPath);
+        const sheet = workbook.getSheet(options.sheet);
+        const syncInput = await readConfigTableSyncInput(
+          jsonPath,
+          options.keyField[0] ?? "Key",
+          options.valueField,
+        );
+        const explicitHeaders =
+          options.headers === undefined ? undefined : parseJsonStringArray(options.headers, "--headers");
+        const headers = resolveConfigTableHeaders(
+          sheet,
+          options.headerRow,
+          explicitHeaders ?? syncInput.headers,
+          syncInput.records,
+        );
+
+        sheet.setHeaders(headers, options.headerRow);
+
+        if (options.mode === "replace") {
+          writeStructuredTableRecords(sheet, options.headerRow, options.dataStartRow, syncInput.records);
+        } else {
+          const keyFields = resolveTableKeyFields(sheet, options.headerRow, options.keyField);
+          for (const record of syncInput.records) {
+            const keyRecord = pickKeyRecord(record, keyFields);
+            const matchedRow =
+              findStructuredTableRow(sheet, options.headerRow, options.dataStartRow, keyFields, keyRecord)?.row ??
+              null;
+
+            if (matchedRow === null) {
+              sheet.addRecord(record, options.headerRow);
+            } else {
+              writeStructuredTableRecord(sheet, options.headerRow, matchedRow, record);
+            }
+          }
+        }
+
+        await workbook.save(outputPath);
+        writeJson(io.stdout, {
+          action: "table.sync",
+          dataStartRow: options.dataStartRow,
+          headerRow: options.headerRow,
+          input: inputPath,
+          mode: options.mode,
+          output: outputPath,
+          rows: (await getStructuredTableRows(outputPath, options.sheet, options.headerRow, options.dataStartRow)).rows,
           sheet: options.sheet,
           source: jsonPath,
         });
@@ -1224,6 +1512,100 @@ async function getConfigTableRecord(
   };
 }
 
+async function inspectTable(
+  filePath: string,
+  sheetName: string,
+  headerRow: number,
+  dataStartRow: number,
+): Promise<{
+  dataRowCount: number;
+  dataRowsPreview: StructuredTableRow[];
+  dataStartRow: number;
+  file: string;
+  headerRow: number;
+  headers: string[];
+  metadataRows: Array<{ row: number; values: CellValue[] }>;
+  sheet: string;
+}> {
+  const workbook = await Workbook.open(filePath);
+  const sheet = workbook.getSheet(sheetName);
+  const rows = listStructuredTableRows(sheet, headerRow, dataStartRow);
+  const metadataRows: Array<{ row: number; values: CellValue[] }> = [];
+
+  for (let row = headerRow + 1; row < dataStartRow; row += 1) {
+    metadataRows.push({
+      row,
+      values: sheet.getRow(row),
+    });
+  }
+
+  return {
+    dataRowCount: rows.length,
+    dataRowsPreview: rows.slice(0, 5),
+    dataStartRow,
+    file: filePath,
+    headerRow,
+    headers: getTableHeaders(sheet, headerRow),
+    metadataRows,
+    sheet: sheetName,
+  };
+}
+
+async function getStructuredTableRows(
+  filePath: string,
+  sheetName: string,
+  headerRow: number,
+  dataStartRow: number,
+): Promise<{
+  dataStartRow: number;
+  file: string;
+  headerRow: number;
+  rows: StructuredTableRow[];
+  sheet: string;
+}> {
+  const workbook = await Workbook.open(filePath);
+  const sheet = workbook.getSheet(sheetName);
+  return {
+    dataStartRow,
+    file: filePath,
+    headerRow,
+    rows: listStructuredTableRows(sheet, headerRow, dataStartRow),
+    sheet: sheetName,
+  };
+}
+
+async function getStructuredTableRecord(
+  filePath: string,
+  sheetName: string,
+  headerRow: number,
+  dataStartRow: number,
+  explicitKeyFields: string[],
+  keySource: string,
+): Promise<{
+  dataStartRow: number;
+  file: string;
+  headerRow: number;
+  key: CellRecord;
+  keyFields: string[];
+  row: StructuredTableRow | null;
+  sheet: string;
+}> {
+  const workbook = await Workbook.open(filePath);
+  const sheet = workbook.getSheet(sheetName);
+  const keyFields = resolveTableKeyFields(sheet, headerRow, explicitKeyFields);
+  const key = parseTableKey(keySource, keyFields, "--key");
+
+  return {
+    dataStartRow,
+    file: filePath,
+    headerRow,
+    key,
+    keyFields,
+    row: findStructuredTableRow(sheet, headerRow, dataStartRow, keyFields, key) ?? null,
+    sheet: sheetName,
+  };
+}
+
 async function readConfigTableSyncInput(
   filePath: string,
   field: string,
@@ -1703,6 +2085,67 @@ function getOrCreateSheet(workbook: Workbook, sheetName: string) {
   return existingSheet ?? workbook.addSheet(sheetName);
 }
 
+function collectRepeatedStrings(value: string, previous: string[] = []): string[] {
+  return [...previous, value];
+}
+
+function getTableHeaders(sheet: ReturnType<Workbook["getSheet"]>, headerRow: number): string[] {
+  return sheet.getRow(headerRow).map((value) => (typeof value === "string" ? value : ""));
+}
+
+function resolveTableKeyFields(
+  sheet: ReturnType<Workbook["getSheet"]>,
+  headerRow: number,
+  explicitKeyFields: string[],
+): string[] {
+  if (explicitKeyFields.length > 0) {
+    return explicitKeyFields;
+  }
+
+  const headers = getTableHeaders(sheet, headerRow);
+  if (headers.includes("id")) {
+    return ["id"];
+  }
+
+  if (headers.includes("key")) {
+    return ["key"];
+  }
+
+  throw new Error("Unable to infer key fields; pass --key-field explicitly");
+}
+
+function parseTableKey(source: string, keyFields: string[], label: string): CellRecord {
+  const parsed = parseJsonDocument(source, label);
+
+  if (keyFields.length === 1) {
+    if (
+      parsed === null ||
+      typeof parsed === "string" ||
+      typeof parsed === "number" ||
+      typeof parsed === "boolean"
+    ) {
+      return { [keyFields[0]]: parsed };
+    }
+  }
+
+  const record = assertCellRecord(parsed, label);
+  return pickKeyRecord(record, keyFields);
+}
+
+function pickKeyRecord(record: CellRecord, keyFields: string[]): CellRecord {
+  const next: CellRecord = {};
+
+  for (const keyField of keyFields) {
+    if (!Object.hasOwn(record, keyField)) {
+      throw new Error(`Record is missing key field: ${keyField}`);
+    }
+
+    next[keyField] = record[keyField] ?? null;
+  }
+
+  return next;
+}
+
 function resolveConfigTableHeaders(
   sheet: ReturnType<Workbook["getSheet"]>,
   headerRow: number,
@@ -1772,6 +2215,80 @@ function normalizeConfigObjectToRecords(
   }
 
   return records;
+}
+
+function listStructuredTableRows(
+  sheet: ReturnType<Workbook["getSheet"]>,
+  headerRow: number,
+  dataStartRow: number,
+): StructuredTableRow[] {
+  const rows: StructuredTableRow[] = [];
+
+  for (let row = dataStartRow; row <= sheet.rowCount; row += 1) {
+    const record = sheet.getRecord(row, headerRow);
+    if (record !== null) {
+      rows.push({ record, row });
+    }
+  }
+
+  return rows;
+}
+
+function matchesKey(record: CellRecord, keyFields: string[], key: CellRecord): boolean {
+  return keyFields.every((field) => record[field] === key[field]);
+}
+
+function findStructuredTableRow(
+  sheet: ReturnType<Workbook["getSheet"]>,
+  headerRow: number,
+  dataStartRow: number,
+  keyFields: string[],
+  key: CellRecord,
+): StructuredTableRow | null {
+  return (
+    listStructuredTableRows(sheet, headerRow, dataStartRow).find((row) => matchesKey(row.record, keyFields, key)) ??
+    null
+  );
+}
+
+function writeStructuredTableRecord(
+  sheet: ReturnType<Workbook["getSheet"]>,
+  headerRow: number,
+  rowNumber: number,
+  record: CellRecord,
+): void {
+  const headers = getTableHeaders(sheet, headerRow);
+
+  for (let columnIndex = 0; columnIndex < headers.length; columnIndex += 1) {
+    const header = headers[columnIndex];
+    if (header.length === 0) {
+      continue;
+    }
+
+    const nextValue = Object.hasOwn(record, header) ? record[header] ?? null : null;
+    sheet.setCell(rowNumber, columnIndex + 1, nextValue);
+  }
+}
+
+function writeStructuredTableRecords(
+  sheet: ReturnType<Workbook["getSheet"]>,
+  headerRow: number,
+  dataStartRow: number,
+  records: CellRecord[],
+): void {
+  const existingRows = listStructuredTableRows(sheet, headerRow, dataStartRow).map((row) => row.row);
+
+  for (let index = 0; index < records.length; index += 1) {
+    writeStructuredTableRecord(sheet, headerRow, dataStartRow + index, records[index]);
+  }
+
+  const keepRows = new Set(records.map((_, index) => dataStartRow + index));
+  const rowsToDelete = existingRows.filter((row) => !keepRows.has(row));
+  rowsToDelete.sort((left, right) => right - left);
+
+  for (const row of rowsToDelete) {
+    sheet.deleteRecord(row, headerRow);
+  }
 }
 
 function listConfigTableRows(

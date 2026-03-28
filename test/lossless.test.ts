@@ -851,6 +851,27 @@ test("entry APIs iterate existing worksheet cells without dense null scans", asy
   assert.deepEqual(summarizeCellEntries([...sheet.iterCellEntries()]), allEntries);
 });
 
+test("deleteCell removes worksheet cell nodes instead of leaving blank placeholders", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = await loadFixtureEntries(fixtureDir);
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.setCell("C4", "Tail");
+  sheet.deleteCell("A1");
+  sheet.deleteCell(4, 3);
+
+  assert.equal(sheet.getCell("A1"), null);
+  assert.equal(sheet.getCell(4, 3), null);
+  assert.equal(sheet.getUsedRange(), null);
+  assert.deepEqual(sheet.getCellEntries(), []);
+
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.doesNotMatch(sheetXml, /<c r="A1"/);
+  assert.doesNotMatch(sheetXml, /<c r="C4"/);
+  assert.match(sheetXml, /<sheetData>\s*<row r="1"><\/row>\s*<row r="4"><\/row>\s*<\/sheetData>/);
+});
+
 test("header APIs read and write header rows", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = await loadFixtureEntries(fixtureDir);

@@ -648,6 +648,29 @@ export class Sheet {
     );
   }
 
+  deleteCell(address: string): void;
+  deleteCell(rowNumber: number, column: number | string): void;
+  deleteCell(addressOrRowNumber: string | number, column?: number | string): void {
+    const normalizedAddress = resolveCellAddress(addressOrRowNumber, column);
+    const index = this.getSheetIndex();
+    const existingCell = index.cells.get(normalizedAddress);
+
+    if (!existingCell) {
+      return;
+    }
+
+    const row = index.rows.get(existingCell.rowNumber);
+    if (row && row.cells.length === 1) {
+      const nextRowXml = normalizeEmptyRowXml(
+        index.xml.slice(row.start, existingCell.start) + index.xml.slice(existingCell.end, row.end),
+      );
+      this.writeSheetXml(index.xml.slice(0, row.start) + nextRowXml + index.xml.slice(row.end));
+      return;
+    }
+
+    this.writeSheetXml(index.xml.slice(0, existingCell.start) + index.xml.slice(existingCell.end));
+  }
+
   setFormula(address: string, formula: string, options?: SetFormulaOptions): void;
   setFormula(rowNumber: number, column: number | string, formula: string, options?: SetFormulaOptions): void;
   setFormula(
@@ -2543,6 +2566,10 @@ function createCellEntry(cell: LocatedCell): CellEntry {
     columnNumber: cell.columnNumber,
     ...cell.snapshot,
   };
+}
+
+function normalizeEmptyRowXml(rowXml: string): string {
+  return rowXml.replace(/>\s*<\/row>$/, "></row>");
 }
 
 function rewriteTableReferenceXml(

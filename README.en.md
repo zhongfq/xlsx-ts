@@ -101,6 +101,8 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `sheet.removeDataValidation(range)`
 - `sheet.setCell(address, value)`
 - `sheet.setCell(rowNumber, column, value)`
+- `sheet.deleteCell(address)`
+- `sheet.deleteCell(rowNumber, column)`
 - `sheet.deleteRow(row, count?)`
 - `sheet.deleteColumn(column, count?)`
 - `sheet.insertRow(row, count?)`
@@ -202,6 +204,7 @@ Notes:
 - Later `getCell()` and `getFormula()` calls use those indexes directly instead of running a full string match on every read.
 - `sheet.rowCount` and `sheet.columnCount` currently mean the maximum used row number and maximum used column number. Empty sheets return `0`.
 - `sheet.getCellEntries()`, `iterCellEntries()`, `getRowEntries()`, and `getColumnEntries()` expose the real worksheet `<c>` nodes with address, row/column indexes, type, style id, and value, which is useful for large or sparse sheet iteration.
+- `sheet.deleteCell()` removes the worksheet `<c>` node entirely; if you want to keep a styled placeholder but clear the value, continue using `setCell(..., null)`.
 - After each write, the sheet index is rebuilt so later reads always see the latest content.
 - Worksheet edits keep `<dimension ref="...">` in sync so used-range metadata does not go stale.
 - `deleteRow()` and `deleteColumn()` currently update cell coordinates, formulas, merged ranges, worksheet `dimension`, common `ref` and `sqref` attributes, `definedNames`, and explicit formulas in other sheets that reference the edited sheet.

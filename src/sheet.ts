@@ -50,6 +50,13 @@ interface TableReference {
   path: string;
 }
 
+interface UsedRangeBounds {
+  minRow: number;
+  maxRow: number;
+  minColumn: number;
+  maxColumn: number;
+}
+
 export class Sheet {
   name: string;
   readonly path: string;
@@ -96,6 +103,14 @@ export class Sheet {
 
   getFormula(address: string): string | null {
     return this.cell(address).formula;
+  }
+
+  get rowCount(): number {
+    return getUsedBoundsFromCells(this.getSheetIndex().cells.values())?.maxRow ?? 0;
+  }
+
+  get columnCount(): number {
+    return getUsedBoundsFromCells(this.getSheetIndex().cells.values())?.maxColumn ?? 0;
   }
 
   getHeaders(headerRowNumber = 1): string[] {
@@ -224,24 +239,7 @@ export class Sheet {
   }
 
   getUsedRange(): string | null {
-    const cells = [...this.getSheetIndex().cells.values()];
-    if (cells.length === 0) {
-      return null;
-    }
-
-    let minRow = Number.POSITIVE_INFINITY;
-    let maxRow = 0;
-    let minColumn = Number.POSITIVE_INFINITY;
-    let maxColumn = 0;
-
-    for (const cell of cells) {
-      minRow = Math.min(minRow, cell.rowNumber);
-      maxRow = Math.max(maxRow, cell.rowNumber);
-      minColumn = Math.min(minColumn, cell.columnNumber);
-      maxColumn = Math.max(maxColumn, cell.columnNumber);
-    }
-
-    return formatRangeRef(minRow, minColumn, maxRow, maxColumn);
+    return formatUsedRangeBounds(getUsedBoundsFromCells(this.getSheetIndex().cells.values()));
   }
 
   getMergedRanges(): string[] {
@@ -3114,7 +3112,7 @@ function compareCellAddresses(left: string, right: string): number {
 }
 
 function updateDimensionRef(sheetIndex: SheetIndex): string {
-  const usedRange = getUsedRangeFromCells(sheetIndex.cells.values());
+  const usedRange = formatUsedRangeBounds(getUsedBoundsFromCells(sheetIndex.cells.values()));
   const dimensionMatch = sheetIndex.xml.match(/<dimension\b([^>]*?)\/>/);
 
   if (!usedRange) {
@@ -3150,7 +3148,7 @@ function updateDimensionRef(sheetIndex: SheetIndex): string {
   );
 }
 
-function getUsedRangeFromCells(cells: Iterable<LocatedCell>): string | null {
+function getUsedBoundsFromCells(cells: Iterable<LocatedCell>): UsedRangeBounds | null {
   let minRow = Number.POSITIVE_INFINITY;
   let maxRow = 0;
   let minColumn = Number.POSITIVE_INFINITY;
@@ -3165,7 +3163,11 @@ function getUsedRangeFromCells(cells: Iterable<LocatedCell>): string | null {
     maxColumn = Math.max(maxColumn, cell.columnNumber);
   }
 
-  return hasCells ? formatRangeRef(minRow, minColumn, maxRow, maxColumn) : null;
+  return hasCells ? { minRow, maxRow, minColumn, maxColumn } : null;
+}
+
+function formatUsedRangeBounds(bounds: UsedRangeBounds | null): string | null {
+  return bounds ? formatRangeRef(bounds.minRow, bounds.minColumn, bounds.maxRow, bounds.maxColumn) : null;
 }
 
 function assertRowNumber(rowNumber: number): void {

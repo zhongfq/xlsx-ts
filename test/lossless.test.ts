@@ -153,6 +153,41 @@ test("range APIs read and write rectangular values", async () => {
   assert.match(sheetXml, /<row r="3"><c r="B3"><v>3<\/v><\/c><c r="C3"><v>4<\/v><\/c><\/row>/);
 });
 
+test("sheet rowCount and columnCount track the used bounds", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData></sheetData>
+</worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  assert.equal(sheet.rowCount, 0);
+  assert.equal(sheet.columnCount, 0);
+
+  sheet.setCell("C5", 1);
+
+  assert.equal(sheet.rowCount, 5);
+  assert.equal(sheet.columnCount, 3);
+  assert.equal(sheet.getUsedRange(), "C5");
+
+  sheet.setCell("A1", "Top");
+
+  assert.equal(sheet.rowCount, 5);
+  assert.equal(sheet.columnCount, 3);
+  assert.equal(sheet.getUsedRange(), "A1:C5");
+
+  sheet.deleteColumn("B");
+
+  assert.equal(sheet.rowCount, 5);
+  assert.equal(sheet.columnCount, 2);
+  assert.equal(sheet.getUsedRange(), "A1:B5");
+});
+
 test("insertColumn shifts cell addresses, formulas, and merged ranges together", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = replaceEntryText(

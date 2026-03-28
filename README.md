@@ -66,6 +66,8 @@
 - `sheet.cell(address)`
 - `sheet.rename(name)`
 - `sheet.getCell(address)`
+- `sheet.rowCount`
+- `sheet.columnCount`
 - `sheet.getHeaders(headerRowNumber?)`
 - `sheet.getRecord(rowNumber, headerRowNumber?)`
 - `sheet.getRecords(headerRowNumber?)`
@@ -121,6 +123,7 @@ workbook.setSheetVisibility("Summary", "hidden");
 detailSheet.rename("Detail 2026");
 console.log(sheet.getTables());
 console.log(sheet.getHyperlinks());
+console.log(sheet.rowCount, sheet.columnCount);
 sheet.addTable("A1:B10", { name: "Scores" });
 sheet.setHyperlink("A1", "https://example.com", { text: "Hello", tooltip: "Open link" });
 sheet.setHyperlink("B2", "#Summary!A1");
@@ -174,6 +177,7 @@ await workbook.save("output.xlsx");
 - 同一张工作表首次读写时会扫描一次 `sheetData`，建立单元格与行的位置索引
 - `sheet.cell(address)` 返回可复用的 `Cell` 句柄，值/公式/样式索引会按工作表 revision 缓存
 - 后续 `getCell` / `getFormula` 会直接走索引查找，不再每次整张表做字符串匹配
+- `sheet.rowCount` / `sheet.columnCount` 当前表示已用区域的最大行号 / 最大列号；空表返回 `0`
 - 每次写入后会重建该表索引，保证后续读取拿到的是最新结果
 - 修改工作表后会同步维护 `<dimension ref="...">`，避免使用范围信息过期
 - `deleteRow()` / `deleteColumn()` 当前会同步更新本 sheet 的单元格坐标、公式引用、合并区域、`dimension`、常见 `ref/sqref` 属性、`definedNames`，以及其它 sheet 里显式引用它的公式

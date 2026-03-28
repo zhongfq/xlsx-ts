@@ -71,6 +71,8 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `sheet.cell(address)`
 - `sheet.rename(name)`
 - `sheet.getCell(address)`
+- `sheet.rowCount`
+- `sheet.columnCount`
 - `sheet.getHeaders(headerRowNumber?)`
 - `sheet.getRecord(rowNumber, headerRowNumber?)`
 - `sheet.getRecords(headerRowNumber?)`
@@ -126,6 +128,7 @@ workbook.setSheetVisibility("Summary", "hidden");
 detailSheet.rename("Detail 2026");
 console.log(sheet.getTables());
 console.log(sheet.getHyperlinks());
+console.log(sheet.rowCount, sheet.columnCount);
 sheet.addTable("A1:B10", { name: "Scores" });
 sheet.setHyperlink("A1", "https://example.com", { text: "Hello", tooltip: "Open link" });
 sheet.setHyperlink("B2", "#Summary!A1");
@@ -179,6 +182,7 @@ Notes:
 - On first read/write access, a sheet scans `sheetData` once and builds indexes for rows and cells.
 - `sheet.cell(address)` returns a reusable `Cell` handle whose parsed value/formula/style state is cached by sheet revision.
 - Later `getCell()` and `getFormula()` calls use those indexes directly instead of running a full string match on every read.
+- `sheet.rowCount` and `sheet.columnCount` currently mean the maximum used row number and maximum used column number. Empty sheets return `0`.
 - After each write, the sheet index is rebuilt so later reads always see the latest content.
 - Worksheet edits keep `<dimension ref="...">` in sync so used-range metadata does not go stale.
 - `deleteRow()` and `deleteColumn()` currently update cell coordinates, formulas, merged ranges, worksheet `dimension`, common `ref` and `sqref` attributes, `definedNames`, and explicit formulas in other sheets that reference the edited sheet.

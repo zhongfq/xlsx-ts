@@ -238,6 +238,30 @@ export class Sheet {
     return parseMergedRanges(this.getSheetIndex().xml);
   }
 
+  insertColumn(column: number | string, count = 1): void {
+    const columnNumber = normalizeColumnNumber(column);
+    assertInsertCount(count);
+
+    const index = this.getSheetIndex();
+    let nextSheetXml = index.xml;
+    const nextMergedRanges = this.getMergedRanges().map((range) =>
+      shiftRangeRefColumns(range, columnNumber, count),
+    );
+
+    for (const rowNumber of [...index.rowNumbers].sort((left, right) => right - left)) {
+      const row = index.rows.get(rowNumber);
+      if (!row || row.selfClosing || row.cells.length === 0) {
+        continue;
+      }
+
+      const nextRowXml = transformRowXml(index.xml, row, columnNumber, count, this.name);
+      nextSheetXml = nextSheetXml.slice(0, row.start) + nextRowXml + nextSheetXml.slice(row.end);
+    }
+
+    nextSheetXml = updateMergedRanges(nextSheetXml, nextMergedRanges);
+    this.writeSheetXml(nextSheetXml);
+  }
+
   setCell(address: string, value: CellValue): void {
     const normalizedAddress = normalizeCellAddress(address);
     const existingCell = this.getSheetIndex().cells.get(normalizedAddress);
@@ -692,6 +716,90 @@ function buildFormulaValueXml(value: CellValue): string {
   return `<v>${String(value)}</v>`;
 }
 
+function transformRowXml(
+  sheetXml: string,
+  row: LocatedRow,
+  targetColumnNumber: number,
+  count: number,
+  sheetName: string,
+): string {
+  const rowAttributes = parseAttributes(row.attributesSource);
+  const nextRowAttributes = rowAttributes.map(([name, value]) => {
+    if (name === "spans") {
+      return [name, shiftRowSpans(value, targetColumnNumber, count)] as [string, string];
+    }
+
+    return [name, value] as [string, string];
+  });
+
+  const rowOpenTag = `<row ${serializeAttributes(nextRowAttributes)}>`;
+  let nextInnerXml = "";
+  let cursor = row.innerStart;
+
+  for (const cell of row.cells) {
+    nextInnerXml += sheetXml.slice(cursor, cell.start);
+    nextInnerXml += transformCellXml(
+      sheetXml.slice(cell.start, cell.end),
+      cell,
+      targetColumnNumber,
+      count,
+      sheetName,
+    );
+    cursor = cell.end;
+  }
+
+  nextInnerXml += sheetXml.slice(cursor, row.innerEnd);
+  return `${rowOpenTag}${nextInnerXml}</row>`;
+}
+
+function transformCellXml(
+  cellXml: string,
+  cell: LocatedCell,
+  targetColumnNumber: number,
+  count: number,
+  sheetName: string,
+): string {
+  const attributes = parseAttributes(cell.attributesSource);
+  const nextAttributes = attributes.map(([name, value]) => {
+    if (name === "r") {
+      return [name, shiftCellAddressColumns(value, targetColumnNumber, count)] as [string, string];
+    }
+
+    return [name, value] as [string, string];
+  });
+
+  const nextCellOpenTag = `<c ${serializeAttributes(nextAttributes)}`;
+  if (!cellXml.includes("</c>")) {
+    return `${nextCellOpenTag}/>`;
+  }
+
+  const innerStart = cellXml.indexOf(">") + 1;
+  const innerEnd = cellXml.lastIndexOf("</c>");
+  let nextInnerXml = cellXml.slice(innerStart, innerEnd);
+
+  nextInnerXml = nextInnerXml.replace(/<f\b([^>]*)>([\s\S]*?)<\/f>/g, (_match, attributesSource, formulaSource) => {
+    const formulaAttributes = parseAttributes(attributesSource);
+    const nextFormulaAttributes = formulaAttributes.map(([name, value]) => {
+      if (name === "ref") {
+        return [name, shiftRangeRefColumns(value, targetColumnNumber, count)] as [string, string];
+      }
+
+      return [name, value] as [string, string];
+    });
+    const serializedAttributes = serializeAttributes(nextFormulaAttributes);
+    const shiftedFormula = shiftFormulaReferences(
+      decodeXmlText(formulaSource),
+      targetColumnNumber,
+      count,
+      sheetName,
+    );
+
+    return `<f${serializedAttributes ? ` ${serializedAttributes}` : ""}>${escapeXmlText(shiftedFormula)}</f>`;
+  });
+
+  return `${nextCellOpenTag}>${nextInnerXml}</c>`;
+}
+
 function insertCell(sheetIndex: SheetIndex, address: string, cellXml: string): string {
   const { rowNumber, columnNumber } = splitCellAddress(address);
   const row = sheetIndex.rows.get(rowNumber);
@@ -932,6 +1040,108 @@ function numberToColumnLabel(columnNumber: number): string {
   return label;
 }
 
+function shiftCellAddressColumns(address: string, targetColumnNumber: number, count: number): string {
+  const { rowNumber, columnNumber } = splitCellAddress(address);
+  const nextColumnNumber = columnNumber >= targetColumnNumber ? columnNumber + count : columnNumber;
+  return makeCellAddress(rowNumber, nextColumnNumber);
+}
+
+function shiftRangeRefColumns(range: string, targetColumnNumber: number, count: number): string {
+  const { startRow, endRow, startColumn, endColumn } = parseRangeRef(range);
+
+  return formatRangeRef(
+    startRow,
+    startColumn >= targetColumnNumber ? startColumn + count : startColumn,
+    endRow,
+    endColumn >= targetColumnNumber ? endColumn + count : endColumn,
+  );
+}
+
+function shiftRowSpans(spans: string, targetColumnNumber: number, count: number): string {
+  const match = spans.match(/^(\d+):(\d+)$/);
+  if (!match) {
+    return spans;
+  }
+
+  const startColumn = Number(match[1]);
+  const endColumn = Number(match[2]);
+  return `${startColumn >= targetColumnNumber ? startColumn + count : startColumn}:${endColumn >= targetColumnNumber ? endColumn + count : endColumn}`;
+}
+
+function shiftFormulaReferences(
+  formula: string,
+  targetColumnNumber: number,
+  count: number,
+  currentSheetName: string,
+): string {
+  let nextFormula = "";
+  let cursor = 0;
+  let inString = false;
+
+  while (cursor < formula.length) {
+    const character = formula[cursor];
+
+    if (character === "\"") {
+      nextFormula += character;
+
+      if (inString && formula[cursor + 1] === "\"") {
+        nextFormula += "\"";
+        cursor += 2;
+        continue;
+      }
+
+      inString = !inString;
+      cursor += 1;
+      continue;
+    }
+
+    if (inString) {
+      nextFormula += character;
+      cursor += 1;
+      continue;
+    }
+
+    const remaining = formula.slice(cursor);
+    const match = remaining.match(/^((?:'[^']+'|[A-Za-z_][A-Za-z0-9_.]*)!)?(\$?)([A-Z]+)(\$?)(\d+)/);
+
+    if (!match) {
+      nextFormula += character;
+      cursor += 1;
+      continue;
+    }
+
+    const [fullMatch, sheetRef, columnDollar, columnLabel, rowDollar, rowNumber] = match;
+    const previous = formula[cursor - 1];
+
+    if ((!sheetRef && previous && /[A-Za-z0-9_.]/.test(previous)) || !matchesCurrentSheetReference(sheetRef, currentSheetName)) {
+      nextFormula += fullMatch;
+      cursor += fullMatch.length;
+      continue;
+    }
+
+    const columnNumber = columnLabelToNumber(columnLabel);
+    const nextColumnNumber = columnNumber >= targetColumnNumber ? columnNumber + count : columnNumber;
+    nextFormula += `${sheetRef ?? ""}${columnDollar}${numberToColumnLabel(nextColumnNumber)}${rowDollar}${rowNumber}`;
+    cursor += fullMatch.length;
+  }
+
+  return nextFormula;
+}
+
+function matchesCurrentSheetReference(sheetRef: string | undefined, currentSheetName: string): boolean {
+  if (!sheetRef) {
+    return true;
+  }
+
+  const rawSheetName = sheetRef.slice(0, -1);
+  const normalizedSheetName =
+    rawSheetName.startsWith("'") && rawSheetName.endsWith("'")
+      ? rawSheetName.slice(1, -1).replaceAll("''", "'")
+      : rawSheetName;
+
+  return normalizedSheetName === currentSheetName;
+}
+
 function parseMergedRanges(sheetXml: string): string[] {
   const mergeCellsMatch = sheetXml.match(/<mergeCells\b[^>]*>([\s\S]*?)<\/mergeCells>/);
   if (!mergeCellsMatch) {
@@ -1058,5 +1268,11 @@ function assertRowNumber(rowNumber: number): void {
 function assertColumnNumber(columnNumber: number): void {
   if (!Number.isInteger(columnNumber) || columnNumber < 1) {
     throw new XlsxError(`Invalid column number: ${columnNumber}`);
+  }
+}
+
+function assertInsertCount(count: number): void {
+  if (!Number.isInteger(count) || count < 1) {
+    throw new XlsxError(`Invalid insert count: ${count}`);
   }
 }

@@ -7,13 +7,15 @@ import {
   renameSheetFormulaReferences,
   shiftFormulaReferences,
 } from "./sheet.js";
+import { parseSharedStrings } from "./shared-strings.js";
 import { CliZipAdapter } from "./zip-cli.js";
-import { basenamePosix, dirnamePosix, resolvePosix } from "./utils/path.js";
+import type { WorkbookContext } from "./workbook-context.js";
+import { resolveWorkbookContext } from "./workbook-context.js";
+import { basenamePosix, dirnamePosix } from "./utils/path.js";
 import {
   escapeXmlText,
   decodeXmlText,
   escapeRegex,
-  extractAllTagTexts,
   getXmlAttr,
   parseAttributes,
   serializeAttributes,
@@ -25,14 +27,6 @@ const WORKSHEET_CONTENT_TYPE =
   "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml";
 const WORKSHEET_RELATIONSHIP_TYPE =
   "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet";
-
-interface WorkbookContext {
-  workbookDir: string;
-  workbookPath: string;
-  workbookRelsPath: string;
-  sharedStringsPath?: string;
-  sheets: Sheet[];
-}
 
 export class Workbook {
   private readonly adapter: CliZipAdapter;
@@ -344,24 +338,7 @@ export class Workbook {
       return this.workbookContext;
     }
 
-    const rootRels = this.readEntryText("_rels/.rels");
-    const workbookTarget = findRelationshipTarget(rootRels, /\/officeDocument$/) ?? "xl/workbook.xml";
-    const workbookPath = workbookTarget.replace(/^\/+/, "");
-    const workbookDir = dirnamePosix(workbookPath);
-    const workbookRelsPath = `${workbookDir}/_rels/${basenamePosix(workbookPath)}.rels`;
-    const workbookXml = this.readEntryText(workbookPath);
-    const workbookRelsXml = this.readEntryText(workbookRelsPath);
-    const relationships = parseRelationships(workbookRelsXml, workbookDir);
-    const sheets = parseSheets(this, workbookXml, relationships);
-    const sharedStringsPath = findRelationshipTarget(workbookRelsXml, /\/sharedStrings$/, workbookDir);
-
-    this.workbookContext = {
-      workbookDir,
-      workbookPath,
-      workbookRelsPath,
-      sharedStringsPath,
-      sheets,
-    };
+    this.workbookContext = resolveWorkbookContext(this, (path) => this.readEntryText(path));
 
     return this.workbookContext;
   }
@@ -385,10 +362,7 @@ export class Workbook {
       return this.sharedStringsCache;
     }
 
-    const xml = this.readEntryText(sharedStringsPath);
-    this.sharedStringsCache = Array.from(xml.matchAll(/<si\b[^>]*>([\s\S]*?)<\/si>/g), (match) =>
-      extractAllTagTexts(match[1], "t").map(decodeXmlText).join(""),
-    );
+    this.sharedStringsCache = parseSharedStrings(this.readEntryText(sharedStringsPath));
     return this.sharedStringsCache;
   }
 
@@ -918,75 +892,4 @@ function formatSheetNameForReference(sheetName: string): string {
   }
 
   return `'${sheetName.replaceAll("'", "''")}'`;
-}
-
-function parseRelationships(xml: string, baseDir: string): Map<string, string> {
-  const relationships = new Map<string, string>();
-
-  for (const match of xml.matchAll(/<Relationship\b([^>]*?)\/>/g)) {
-    const attributesSource = match[1];
-    const id = getXmlAttr(attributesSource, "Id");
-    const target = getXmlAttr(attributesSource, "Target");
-
-    if (!id || !target) {
-      continue;
-    }
-
-    relationships.set(id, resolvePosix(baseDir, target.replace(/^\/+/, "")));
-  }
-
-  return relationships;
-}
-
-function parseSheets(
-  workbook: Workbook,
-  workbookXml: string,
-  relationships: Map<string, string>,
-): Sheet[] {
-  const sheets: Sheet[] = [];
-
-  for (const match of workbookXml.matchAll(/<sheet\b([^>]*?)(?:\/>|>[\s\S]*?<\/sheet>)/g)) {
-    const attributesSource = match[1];
-    const name = getXmlAttr(attributesSource, "name");
-    const relationshipId = getXmlAttr(attributesSource, "r:id");
-
-    if (!name || !relationshipId) {
-      continue;
-    }
-
-    const path = relationships.get(relationshipId);
-    if (!path) {
-      continue;
-    }
-
-    sheets.push(
-      new Sheet(workbook, {
-        name,
-        path,
-        relationshipId,
-      }),
-    );
-  }
-
-  return sheets;
-}
-
-function findRelationshipTarget(
-  xml: string,
-  typePattern: RegExp,
-  baseDir = "",
-): string | undefined {
-  for (const match of xml.matchAll(/<Relationship\b([^>]*?)\/>/g)) {
-    const attributesSource = match[1];
-    const type = getXmlAttr(attributesSource, "Type");
-    const target = getXmlAttr(attributesSource, "Target");
-
-    if (!type || !target || !typePattern.test(type)) {
-      continue;
-    }
-
-    return baseDir ? resolvePosix(baseDir, target.replace(/^\/+/, "")) : target;
-  }
-
-  return undefined;
 }

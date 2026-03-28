@@ -60,6 +60,9 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `workbook.getSheets()`
 - `workbook.getSheet(name)`
 - `workbook.getActiveSheet()`
+- `workbook.getNumberFormat(numFmtId)`
+- `workbook.updateNumberFormat(numFmtId, formatCode)`
+- `workbook.cloneNumberFormat(numFmtId, formatCode?)`
 - `workbook.getBorder(borderId)`
 - `workbook.updateBorder(borderId, patch)`
 - `workbook.cloneBorder(borderId, patch?)`
@@ -88,6 +91,8 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `sheet.rename(name)`
 - `sheet.getCell(address)`
 - `sheet.getCell(rowNumber, column)`
+- `sheet.getNumberFormat(address)`
+- `sheet.getNumberFormat(rowNumber, column)`
 - `sheet.getBorder(address)`
 - `sheet.getBorder(rowNumber, column)`
 - `sheet.getFill(address)`
@@ -104,6 +109,8 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `sheet.getColumnStyle(column)`
 - `sheet.copyStyle(sourceAddress, targetAddress)`
 - `sheet.copyStyle(sourceRowNumber, sourceColumn, targetRowNumber, targetColumn)`
+- `sheet.setNumberFormat(address, formatCode)`
+- `sheet.setNumberFormat(rowNumber, column, formatCode)`
 - `sheet.setBorder(address, patch)`
 - `sheet.setBorder(rowNumber, column, patch)`
 - `sheet.setFill(address, patch)`
@@ -267,7 +274,7 @@ await workbook.save("output.xlsx");
 Notes:
 
 - On first read/write access, a sheet scans `sheetData` once and builds indexes for rows and cells.
-- `sheet.cell(address)` returns a reusable `Cell` handle whose parsed value/formula/style-index state is cached by sheet revision. It now also exposes `cell.style`, `cell.font`, `cell.fill`, `cell.border`, `cell.setStyle(patch)`, `cell.setFont(patch)`, `cell.setFill(patch)`, `cell.setBorder(patch)`, and `cell.cloneStyle(patch?)`.
+- `sheet.cell(address)` returns a reusable `Cell` handle whose parsed value/formula/style-index state is cached by sheet revision. It now also exposes `cell.style`, `cell.font`, `cell.fill`, `cell.border`, `cell.numberFormat`, `cell.setStyle(patch)`, `cell.setFont(patch)`, `cell.setFill(patch)`, `cell.setBorder(patch)`, `cell.setNumberFormat(formatCode)`, and `cell.cloneStyle(patch?)`.
 - `sheet.cell()`, `getCell()`, `setCell()`, `getFormula()`, and `setFormula()` now support both `A1` addresses and `(rowNumber, column)` calls. Row and column indexes are 1-based.
 - Later `getCell()` and `getFormula()` calls use those indexes directly instead of running a full string match on every read.
 - `sheet.rowCount` and `sheet.columnCount` currently mean the maximum used row number and maximum used column number. Empty sheets return `0`.
@@ -277,12 +284,15 @@ Notes:
 - `workbook.getFont()`, `updateFont()`, and `cloneFont()` work directly on the `<fonts>` section in `styles.xml`, which is useful when you want to manage reusable `fontId` values explicitly.
 - `workbook.getFill()`, `updateFill()`, and `cloneFill()` work directly on the `<fills>` section in `styles.xml`, which is useful when you want to manage reusable `fillId` values explicitly.
 - `workbook.getBorder()`, `updateBorder()`, and `cloneBorder()` work directly on the `<borders>` section in `styles.xml`, which is useful when you want to manage reusable `borderId` values explicitly.
+- `workbook.getNumberFormat()`, `updateNumberFormat()`, and `cloneNumberFormat()` work directly on `<numFmt>` entries in `styles.xml`; new custom formats are allocated from `numFmtId` `164` upward.
 - `sheet.getFont()` resolves the font definition currently used by the cell.
 - `sheet.setFont()` and `cell.setFont()` clone the current `fontId`, then clone the current `styleId` with that new font attached, so only the targeted cell changes and other cells sharing the old font/style stay untouched.
 - `sheet.getFill()` resolves the fill definition currently used by the cell.
 - `sheet.setFill()` and `cell.setFill()` clone the current `fillId`, then clone the current `styleId` with that new fill attached, so only the targeted cell changes and other cells sharing the old fill/style stay untouched.
 - `sheet.getBorder()` resolves the border definition currently used by the cell.
 - `sheet.setBorder()` and `cell.setBorder()` clone the current `borderId`, then clone the current `styleId` with that new border attached, so only the targeted cell changes and other cells sharing the old border/style stay untouched.
+- `sheet.getNumberFormat()` resolves the number-format definition currently used by the cell, including common builtin format codes.
+- `sheet.setNumberFormat()` and `cell.setNumberFormat()` reuse or create the target `numFmtId`, then clone the current `styleId` with that new number format attached, so only the targeted cell changes.
 - `sheet.getStyle()` resolves the cell's current style definition; when the cell has no explicit `s="..."`, it falls back to the default style `0`.
 - `sheet.setStyle()` clones the current cell style into a new `styleId`, writes that new definition into `styles.xml`, and applies it back to the same cell so other cells sharing the old style id stay untouched.
 - `sheet.cloneStyle()` clones the current cell style, writes the new definition into `styles.xml`, applies it back to the same cell, and supports both `A1` and `(rowNumber, column)` calls.

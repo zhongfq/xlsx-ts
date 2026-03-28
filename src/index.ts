@@ -18,6 +18,7 @@ export type {
   CellFontColorPatch,
   CellFontDefinition,
   CellFontPatch,
+  CellNumberFormatDefinition,
   CellStyleAlignment,
   CellStyleAlignmentPatch,
   CellStyleDefinition,

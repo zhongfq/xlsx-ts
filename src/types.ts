@@ -80,6 +80,12 @@ export interface CellStylePatch {
   alignment?: CellStyleAlignmentPatch | null;
 }
 
+export interface CellNumberFormatDefinition {
+  builtin: boolean;
+  code: string | null;
+  numFmtId: number;
+}
+
 export interface CellFontColor {
   rgb?: string;
   theme?: number;

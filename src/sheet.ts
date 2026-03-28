@@ -7,6 +7,7 @@ import type {
   CellFillPatch,
   CellFontDefinition,
   CellFontPatch,
+  CellNumberFormatDefinition,
   CellSnapshot,
   CellStyleDefinition,
   CellStylePatch,
@@ -156,6 +157,16 @@ export class Sheet {
     return style ? this.workbook.getBorder(style.borderId) : null;
   }
 
+  getNumberFormat(address: string): CellNumberFormatDefinition | null;
+  getNumberFormat(rowNumber: number, column: number | string): CellNumberFormatDefinition | null;
+  getNumberFormat(addressOrRowNumber: string | number, column?: number | string): CellNumberFormatDefinition | null {
+    const style =
+      typeof addressOrRowNumber === "number"
+        ? this.getStyle(addressOrRowNumber, column!)
+        : this.getStyle(addressOrRowNumber);
+    return style ? this.workbook.getNumberFormat(style.numFmtId) : null;
+  }
+
   getColumnStyleId(column: number | string): number | null {
     const columnNumber = normalizeColumnNumber(column);
     return parseColumnStyleId(this.getSheetIndex().xml, columnNumber);
@@ -281,6 +292,29 @@ export class Sheet {
     });
     this.setStyleId(normalizedAddress, nextStyleId);
     return nextBorderId;
+  }
+
+  setNumberFormat(address: string, formatCode: string): number;
+  setNumberFormat(rowNumber: number, column: number | string, formatCode: string): number;
+  setNumberFormat(
+    addressOrRowNumber: string | number,
+    columnOrFormatCode: number | string,
+    formatCode?: string,
+  ): number {
+    const normalizedAddress = resolveCellAddress(
+      addressOrRowNumber,
+      typeof addressOrRowNumber === "number" ? (columnOrFormatCode as number | string) : undefined,
+    );
+    const nextFormatCode =
+      typeof addressOrRowNumber === "number" ? (formatCode ?? "") : (columnOrFormatCode as string);
+    const currentStyleId = this.getStyleId(normalizedAddress) ?? 0;
+    const nextNumFmtId = this.workbook.ensureNumberFormat(nextFormatCode);
+    const nextStyleId = this.workbook.cloneStyle(currentStyleId, {
+      numFmtId: nextNumFmtId,
+      applyNumberFormat: true,
+    });
+    this.setStyleId(normalizedAddress, nextStyleId);
+    return nextNumFmtId;
   }
 
   cloneStyle(address: string, patch?: CellStylePatch): number;

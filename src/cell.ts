@@ -6,6 +6,7 @@ import type {
   CellFillPatch,
   CellFontDefinition,
   CellFontPatch,
+  CellNumberFormatDefinition,
   CellSnapshot,
   CellStyleDefinition,
   CellStylePatch,
@@ -58,6 +59,10 @@ export class Cell {
     return this.sheet.getBorder(this.address);
   }
 
+  get numberFormat(): CellNumberFormatDefinition | null {
+    return this.sheet.getNumberFormat(this.address);
+  }
+
   get type(): CellType {
     return this.getSnapshot().type;
   }
@@ -92,6 +97,10 @@ export class Cell {
 
   setBorder(patch: CellBorderPatch): number {
     return this.sheet.setBorder(this.address, patch);
+  }
+
+  setNumberFormat(formatCode: string): number {
+    return this.sheet.setNumberFormat(this.address, formatCode);
   }
 
   cloneStyle(patch: CellStylePatch = {}): number {

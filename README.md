@@ -55,6 +55,9 @@
 - `workbook.getSheets()`
 - `workbook.getSheet(name)`
 - `workbook.getActiveSheet()`
+- `workbook.getNumberFormat(numFmtId)`
+- `workbook.updateNumberFormat(numFmtId, formatCode)`
+- `workbook.cloneNumberFormat(numFmtId, formatCode?)`
 - `workbook.getBorder(borderId)`
 - `workbook.updateBorder(borderId, patch)`
 - `workbook.cloneBorder(borderId, patch?)`
@@ -83,6 +86,8 @@
 - `sheet.rename(name)`
 - `sheet.getCell(address)`
 - `sheet.getCell(rowNumber, column)`
+- `sheet.getNumberFormat(address)`
+- `sheet.getNumberFormat(rowNumber, column)`
 - `sheet.getBorder(address)`
 - `sheet.getBorder(rowNumber, column)`
 - `sheet.getFill(address)`
@@ -99,6 +104,8 @@
 - `sheet.getColumnStyle(column)`
 - `sheet.copyStyle(sourceAddress, targetAddress)`
 - `sheet.copyStyle(sourceRowNumber, sourceColumn, targetRowNumber, targetColumn)`
+- `sheet.setNumberFormat(address, formatCode)`
+- `sheet.setNumberFormat(rowNumber, column, formatCode)`
 - `sheet.setBorder(address, patch)`
 - `sheet.setBorder(rowNumber, column, patch)`
 - `sheet.setFill(address, patch)`
@@ -262,7 +269,7 @@ await workbook.save("output.xlsx");
 说明：
 
 - 同一张工作表首次读写时会扫描一次 `sheetData`，建立单元格与行的位置索引
-- `sheet.cell(address)` 返回可复用的 `Cell` 句柄，值/公式/样式索引会按工作表 revision 缓存；现在也可以通过 `cell.style` / `cell.font` / `cell.fill` / `cell.border` 读取当前样式、字体、填充和边框定义，并用 `cell.setStyle(patch)` / `cell.setFont(patch)` / `cell.setFill(patch)` / `cell.setBorder(patch)` / `cell.cloneStyle(patch?)` 直接派生并应用新样式
+- `sheet.cell(address)` 返回可复用的 `Cell` 句柄，值/公式/样式索引会按工作表 revision 缓存；现在也可以通过 `cell.style` / `cell.font` / `cell.fill` / `cell.border` / `cell.numberFormat` 读取当前样式、字体、填充、边框和数字格式定义，并用 `cell.setStyle(patch)` / `cell.setFont(patch)` / `cell.setFill(patch)` / `cell.setBorder(patch)` / `cell.setNumberFormat(formatCode)` / `cell.cloneStyle(patch?)` 直接派生并应用新样式
 - `sheet.cell()` / `getCell()` / `setCell()` / `getFormula()` / `setFormula()` 现在同时支持 `A1` 地址和 `(rowNumber, column)` 两种调用方式；行列索引是从 `1` 开始
 - 后续 `getCell` / `getFormula` 会直接走索引查找，不再每次整张表做字符串匹配
 - `sheet.rowCount` / `sheet.columnCount` 当前表示已用区域的最大行号 / 最大列号；空表返回 `0`
@@ -272,12 +279,15 @@ await workbook.save("output.xlsx");
 - `workbook.getFont()` / `updateFont()` / `cloneFont()` 会直接操作 `styles.xml` 里的 `<fonts>`；适合你想复用或维护 `fontId` 时使用
 - `workbook.getFill()` / `updateFill()` / `cloneFill()` 会直接操作 `styles.xml` 里的 `<fills>`；适合你想复用或维护 `fillId` 时使用
 - `workbook.getBorder()` / `updateBorder()` / `cloneBorder()` 会直接操作 `styles.xml` 里的 `<borders>`；适合你想复用或维护 `borderId` 时使用
+- `workbook.getNumberFormat()` / `updateNumberFormat()` / `cloneNumberFormat()` 会直接操作 `styles.xml` 里的 `<numFmt>`；自定义格式会从 `164` 开始分配新的 `numFmtId`
 - `sheet.getFont()` 会解析当前单元格最终引用到的字体定义
 - `sheet.setFont()` / `cell.setFont()` 会先 clone 当前 `fontId`，再 clone 当前 `styleId` 并把新 `fontId` 套上去，所以只会影响当前单元格，不会污染其它共用旧字体或旧样式的单元格
 - `sheet.getFill()` 会解析当前单元格最终引用到的填充定义
 - `sheet.setFill()` / `cell.setFill()` 会先 clone 当前 `fillId`，再 clone 当前 `styleId` 并把新 `fillId` 套上去，所以只会影响当前单元格，不会污染其它共用旧填充或旧样式的单元格
 - `sheet.getBorder()` 会解析当前单元格最终引用到的边框定义
 - `sheet.setBorder()` / `cell.setBorder()` 会先 clone 当前 `borderId`，再 clone 当前 `styleId` 并把新 `borderId` 套上去，所以只会影响当前单元格，不会污染其它共用旧边框或旧样式的单元格
+- `sheet.getNumberFormat()` 会解析当前单元格最终引用到的数字格式定义，内建格式会直接映射成常见 format code
+- `sheet.setNumberFormat()` / `cell.setNumberFormat()` 会先复用或创建目标 `numFmtId`，再 clone 当前 `styleId` 并套上新的数字格式，所以也只影响当前单元格
 - `sheet.getStyle()` 会按单元格当前的 `styleId` 读取样式定义；如果单元格本身没有 `s="..."`，会回退到默认样式 `0`
 - `sheet.setStyle()` 会基于当前单元格样式克隆出一个新的 `styleId`，写回 `styles.xml`，并把新样式应用到该单元格；这样不会连带修改其它共用旧 `styleId` 的单元格
 - `sheet.cloneStyle()` 会基于当前单元格样式克隆出一个新的 `styleId`，写回 `styles.xml`，并把新样式直接应用到该单元格；同样支持 `A1` 和 `(rowNumber, column)`

@@ -698,6 +698,85 @@ test("cell border APIs clone and apply borders without mutating shared border id
   assert.match(sheetXml, /<c r="B1" s="3" t="inlineStr"><is><t>World<\/t><\/is><\/c>/);
 });
 
+test("number format APIs read, clone, and update workbook numFmts", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = await loadFixtureEntries(fixtureDir);
+  const workbook = Workbook.fromEntries(entries);
+
+  assert.deepEqual(workbook.getNumberFormat(0), {
+    builtin: true,
+    code: "General",
+    numFmtId: 0,
+  });
+  assert.equal(workbook.getNumberFormat(164), null);
+
+  const nextNumFmtId = workbook.cloneNumberFormat(0, '#,##0.00_);[Red](#,##0.00)');
+  workbook.updateNumberFormat(nextNumFmtId, "0.000");
+
+  assert.equal(nextNumFmtId, 164);
+  assert.deepEqual(workbook.getNumberFormat(164), {
+    builtin: false,
+    code: "0.000",
+    numFmtId: 164,
+  });
+
+  const stylesXml = entryText(workbook.toEntries(), "xl/styles.xml");
+  assert.match(stylesXml, /<numFmts count="1"><numFmt numFmtId="164" formatCode="0.000"\/><\/numFmts><fonts/);
+});
+
+test("cell number format APIs clone and apply numFmt ids without mutating shared styles", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" s="1" t="inlineStr"><is><t>Hello</t></is></c>
+      <c r="B1" s="1" t="inlineStr"><is><t>World</t></is></c>
+    </row>
+  </sheetData>
+</worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+  const cell = sheet.cell("B1");
+
+  assert.deepEqual(sheet.getNumberFormat("A1"), {
+    builtin: true,
+    code: "General",
+    numFmtId: 0,
+  });
+
+  const a1NumFmtId = sheet.setNumberFormat("A1", "0.00%");
+  const b1NumFmtId = cell.setNumberFormat('#,##0.00_);[Red](#,##0.00)');
+
+  assert.equal(a1NumFmtId, 10);
+  assert.equal(b1NumFmtId, 164);
+  assert.deepEqual(sheet.getNumberFormat("A1"), {
+    builtin: true,
+    code: "0.00%",
+    numFmtId: 10,
+  });
+  assert.deepEqual(cell.numberFormat, {
+    builtin: false,
+    code: '#,##0.00_);[Red](#,##0.00)',
+    numFmtId: 164,
+  });
+  assert.deepEqual(workbook.getNumberFormat(0), {
+    builtin: true,
+    code: "General",
+    numFmtId: 0,
+  });
+
+  const stylesXml = entryText(workbook.toEntries(), "xl/styles.xml");
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.match(stylesXml, /<numFmts count="1"><numFmt numFmtId="164" formatCode="#,##0.00_\);\[Red\]\(#,##0.00\)"\/><\/numFmts>/);
+  assert.match(sheetXml, /<c r="A1" s="2" t="inlineStr"><is><t>Hello<\/t><\/is><\/c>/);
+  assert.match(sheetXml, /<c r="B1" s="3" t="inlineStr"><is><t>World<\/t><\/is><\/c>/);
+});
+
 test("copyStyle APIs copy style indexes without changing target values", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = replaceEntryText(

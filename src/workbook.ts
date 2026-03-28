@@ -14,6 +14,7 @@ import type {
   CellFontColorPatch,
   CellFontDefinition,
   CellFontPatch,
+  CellNumberFormatDefinition,
   CellStyleAlignment,
   CellStyleAlignmentPatch,
   CellStyleDefinition,
@@ -78,9 +79,41 @@ interface StylesCache {
   cellXfs: ParsedCellStyle[];
   fills: ParsedFill[];
   fonts: ParsedFont[];
+  numberFormats: Map<number, string>;
   path: string;
   xml: string;
 }
+
+const BUILTIN_NUMBER_FORMATS = new Map<number, string>([
+  [0, "General"],
+  [1, "0"],
+  [2, "0.00"],
+  [3, "#,##0"],
+  [4, "#,##0.00"],
+  [9, "0%"],
+  [10, "0.00%"],
+  [11, "0.00E+00"],
+  [12, "# ?/?"],
+  [13, "# ??/??"],
+  [14, "mm-dd-yy"],
+  [15, "d-mmm-yy"],
+  [16, "d-mmm"],
+  [17, "mmm-yy"],
+  [18, "h:mm AM/PM"],
+  [19, "h:mm:ss AM/PM"],
+  [20, "h:mm"],
+  [21, "h:mm:ss"],
+  [22, "m/d/yy h:mm"],
+  [37, "#,##0 ;(#,##0)"],
+  [38, "#,##0 ;[Red](#,##0)"],
+  [39, "#,##0.00;(#,##0.00)"],
+  [40, "#,##0.00;[Red](#,##0.00)"],
+  [45, "mm:ss"],
+  [46, "[h]:mm:ss"],
+  [47, "mmss.0"],
+  [48, "##0.0E+0"],
+  [49, "@"],
+]);
 
 export class Workbook {
   private readonly adapter: Zip;
@@ -140,6 +173,30 @@ export class Workbook {
     return cloneCellStyleDefinition(this.getStylesCache()?.cellXfs[styleId]?.definition ?? null);
   }
 
+  getNumberFormat(numFmtId: number): CellNumberFormatDefinition | null {
+    assertStyleId(numFmtId);
+    const styles = this.getStylesCache();
+    const customCode = styles?.numberFormats.get(numFmtId);
+    if (customCode !== undefined) {
+      return {
+        builtin: false,
+        code: customCode,
+        numFmtId,
+      };
+    }
+
+    const builtinCode = BUILTIN_NUMBER_FORMATS.get(numFmtId);
+    if (builtinCode !== undefined) {
+      return {
+        builtin: true,
+        code: builtinCode,
+        numFmtId,
+      };
+    }
+
+    return null;
+  }
+
   getFont(fontId: number): CellFontDefinition | null {
     assertStyleId(fontId);
     return cloneCellFontDefinition(this.getStylesCache()?.fonts[fontId]?.definition ?? null);
@@ -153,6 +210,72 @@ export class Workbook {
   getBorder(borderId: number): CellBorderDefinition | null {
     assertStyleId(borderId);
     return cloneCellBorderDefinition(this.getStylesCache()?.borders[borderId]?.definition ?? null);
+  }
+
+  updateNumberFormat(numFmtId: number, formatCode: string): void {
+    assertStyleId(numFmtId);
+    assertFormatCode(formatCode);
+
+    const styles = this.getStylesCache();
+    if (!styles) {
+      throw new XlsxError("Workbook styles.xml not found");
+    }
+
+    if (!styles.numberFormats.has(numFmtId)) {
+      if (BUILTIN_NUMBER_FORMATS.has(numFmtId)) {
+        throw new XlsxError(`Cannot update builtin number format: ${numFmtId}`);
+      }
+
+      throw new XlsxError(`Number format not found: ${numFmtId}`);
+    }
+
+    this.writeEntryText(styles.path, upsertNumberFormatInStylesXml(styles.xml, numFmtId, formatCode));
+  }
+
+  cloneNumberFormat(numFmtId: number, formatCode?: string): number {
+    assertStyleId(numFmtId);
+    if (formatCode !== undefined) {
+      assertFormatCode(formatCode);
+    }
+
+    const styles = this.getStylesCache();
+    if (!styles) {
+      throw new XlsxError("Workbook styles.xml not found");
+    }
+
+    const sourceCode = formatCode ?? styles.numberFormats.get(numFmtId) ?? BUILTIN_NUMBER_FORMATS.get(numFmtId);
+    if (sourceCode === undefined) {
+      throw new XlsxError(`Number format not found: ${numFmtId}`);
+    }
+
+    const nextNumFmtId = getNextCustomNumberFormatId(styles.numberFormats);
+    this.writeEntryText(styles.path, upsertNumberFormatInStylesXml(styles.xml, nextNumFmtId, sourceCode));
+    return nextNumFmtId;
+  }
+
+  ensureNumberFormat(formatCode: string): number {
+    assertFormatCode(formatCode);
+
+    for (const [numFmtId, builtinCode] of BUILTIN_NUMBER_FORMATS) {
+      if (builtinCode === formatCode) {
+        return numFmtId;
+      }
+    }
+
+    const styles = this.getStylesCache();
+    if (!styles) {
+      throw new XlsxError("Workbook styles.xml not found");
+    }
+
+    for (const [numFmtId, existingCode] of styles.numberFormats) {
+      if (existingCode === formatCode) {
+        return numFmtId;
+      }
+    }
+
+    const nextNumFmtId = getNextCustomNumberFormatId(styles.numberFormats);
+    this.writeEntryText(styles.path, upsertNumberFormatInStylesXml(styles.xml, nextNumFmtId, formatCode));
+    return nextNumFmtId;
   }
 
   updateFont(fontId: number, patch: CellFontPatch): void {
@@ -891,10 +1014,27 @@ function parseStylesXml(path: string, xml: string): StylesCache {
     fonts: Array.from(fontsMatch[2].matchAll(/<font\b[^>]*?>([\s\S]*?)<\/font>|<font\b[^>]*?\/>/g), (match) =>
       parseFont(match[0]),
     ),
+    numberFormats: parseNumberFormats(xml),
     cellXfs: Array.from(cellXfsMatch[2].matchAll(/<xf\b([^>]*?)(?:\/>|>([\s\S]*?)<\/xf>)/g), (match) =>
       parseCellStyle(match[1], match[2] ?? ""),
     ),
   };
+}
+
+function parseNumberFormats(stylesXml: string): Map<number, string> {
+  const numberFormats = new Map<number, string>();
+
+  for (const match of stylesXml.matchAll(/<numFmt\b([^>]*)\/>/g)) {
+    const numFmtIdText = getXmlAttr(match[1], "numFmtId");
+    const formatCode = getXmlAttr(match[1], "formatCode");
+    if (numFmtIdText === undefined || formatCode === undefined) {
+      continue;
+    }
+
+    numberFormats.set(Number(numFmtIdText), decodeXmlText(formatCode));
+  }
+
+  return numberFormats;
 }
 
 function parseBorder(borderXml: string): ParsedBorder {
@@ -1244,6 +1384,48 @@ function replaceBorderInStylesXml(stylesXml: string, borderId: number, borderXml
   }
 
   throw new XlsxError(`Border not found: ${borderId}`);
+}
+
+function upsertNumberFormatInStylesXml(stylesXml: string, numFmtId: number, formatCode: string): string {
+  const numFmtXml = `<numFmt numFmtId="${numFmtId}" formatCode="${escapeXmlText(formatCode)}"/>`;
+  const numberFormatsMatch = stylesXml.match(/<numFmts\b([^>]*)>([\s\S]*?)<\/numFmts>/);
+
+  if (!numberFormatsMatch || numberFormatsMatch.index === undefined) {
+    const fontsMatch = stylesXml.match(/<fonts\b/);
+    if (!fontsMatch || fontsMatch.index === undefined) {
+      throw new XlsxError("styles.xml is missing <fonts>");
+    }
+
+    return (
+      stylesXml.slice(0, fontsMatch.index) +
+      `<numFmts count="1">${numFmtXml}</numFmts>` +
+      stylesXml.slice(fontsMatch.index)
+    );
+  }
+
+  const innerXml = numberFormatsMatch[2];
+  let found = false;
+  const nextInnerXml = innerXml.replace(/<numFmt\b([^>]*)\/>/g, (match, attributesSource) => {
+    const currentNumFmtId = getXmlAttr(attributesSource, "numFmtId");
+    if (currentNumFmtId === undefined || Number(currentNumFmtId) !== numFmtId) {
+      return match;
+    }
+
+    found = true;
+    return numFmtXml;
+  });
+
+  const finalInnerXml = found ? nextInnerXml : `${nextInnerXml}${numFmtXml}`;
+  const nextCount = Array.from(finalInnerXml.matchAll(/<numFmt\b/g)).length;
+  const nextAttributes = upsertAttribute(parseAttributes(numberFormatsMatch[1]), "count", String(nextCount));
+  const serializedAttributes = serializeAttributes(nextAttributes);
+  const nextNumFmtsXml = `<numFmts${serializedAttributes ? ` ${serializedAttributes}` : ""}>${finalInnerXml}</numFmts>`;
+
+  return (
+    stylesXml.slice(0, numberFormatsMatch.index) +
+    nextNumFmtsXml +
+    stylesXml.slice(numberFormatsMatch.index + numberFormatsMatch[0].length)
+  );
 }
 
 function appendCellXfToStylesXml(stylesXml: string, xfXml: string): string {
@@ -1953,6 +2135,16 @@ function parseBorderColorDefinition(tagXml: string | null): CellBorderColor | nu
   return Object.keys(color).length === 0 ? null : color;
 }
 
+function getNextCustomNumberFormatId(numberFormats: Map<number, string>): number {
+  let nextNumFmtId = 164;
+
+  for (const numFmtId of numberFormats.keys()) {
+    nextNumFmtId = Math.max(nextNumFmtId, numFmtId + 1);
+  }
+
+  return nextNumFmtId;
+}
+
 function parseRequiredIntegerAttribute(
   attributes: Array<[string, string]>,
   name: string,
@@ -2130,6 +2322,12 @@ function assertCellBorderPatch(patch: CellBorderPatch): void {
   assertCellBorderSidePatch(patch.diagonal, "diagonal");
   assertCellBorderSidePatch(patch.vertical, "vertical");
   assertCellBorderSidePatch(patch.horizontal, "horizontal");
+}
+
+function assertFormatCode(formatCode: string): void {
+  if (formatCode.length === 0) {
+    throw new XlsxError("Invalid format code: empty");
+  }
 }
 
 function assertCellFontColorPatch(patch: CellFontColorPatch): void {

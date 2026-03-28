@@ -1,5 +1,7 @@
 import type { Sheet } from "./sheet.js";
 import type {
+  CellStyleAlignment,
+  CellStyleAlignmentPatch,
   CellBorderDefinition,
   CellBorderPatch,
   CellFillDefinition,
@@ -47,6 +49,10 @@ export class Cell {
     return this.sheet.getStyle(this.address);
   }
 
+  get alignment(): CellStyleAlignment | null {
+    return this.sheet.getAlignment(this.address);
+  }
+
   get font(): CellFontDefinition | null {
     return this.sheet.getFont(this.address);
   }
@@ -85,6 +91,10 @@ export class Cell {
 
   setStyle(patch: CellStylePatch): number {
     return this.sheet.setStyle(this.address, patch);
+  }
+
+  setAlignment(patch: CellStyleAlignmentPatch | null): number {
+    return this.sheet.setAlignment(this.address, patch);
   }
 
   setFont(patch: CellFontPatch): number {

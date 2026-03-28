@@ -777,6 +777,67 @@ test("cell number format APIs clone and apply numFmt ids without mutating shared
   assert.match(sheetXml, /<c r="B1" s="3" t="inlineStr"><is><t>World<\/t><\/is><\/c>/);
 });
 
+test("cell alignment APIs clone and apply alignments without mutating shared styles", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" s="1" t="inlineStr"><is><t>Hello</t></is></c>
+      <c r="B1" s="1" t="inlineStr"><is><t>World</t></is></c>
+    </row>
+  </sheetData>
+</worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+  const cell = sheet.cell("B1");
+
+  assert.equal(sheet.getAlignment("A1"), null);
+  assert.equal(cell.alignment, null);
+
+  const a1StyleId = sheet.setAlignment("A1", {
+    horizontal: "center",
+    wrapText: true,
+  });
+  const b1StyleId = cell.setAlignment({
+    horizontal: "right",
+  });
+
+  assert.equal(a1StyleId, 2);
+  assert.equal(b1StyleId, 3);
+  assert.equal(workbook.getStyle(1)?.alignment, null);
+  assert.deepEqual(sheet.getAlignment("A1"), {
+    horizontal: "center",
+    wrapText: true,
+  });
+  assert.deepEqual(cell.alignment, {
+    horizontal: "right",
+  });
+
+  const clearedStyleId = cell.setAlignment(null);
+
+  assert.equal(clearedStyleId, 4);
+  assert.equal(cell.alignment, null);
+
+  const stylesXml = entryText(workbook.toEntries(), "xl/styles.xml");
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.match(stylesXml, /<cellXfs count="5">/);
+  assert.match(
+    stylesXml,
+    /<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" wrapText="1"\/><\/xf>/,
+  );
+  assert.match(
+    stylesXml,
+    /<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="right"\/><\/xf>/,
+  );
+  assert.match(sheetXml, /<c r="A1" s="2" t="inlineStr"><is><t>Hello<\/t><\/is><\/c>/);
+  assert.match(sheetXml, /<c r="B1" s="4" t="inlineStr"><is><t>World<\/t><\/is><\/c>/);
+});
+
 test("copyStyle APIs copy style indexes without changing target values", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = replaceEntryText(

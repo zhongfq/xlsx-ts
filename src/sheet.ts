@@ -1,5 +1,7 @@
 import { Cell } from "./cell.js";
 import type {
+  CellStyleAlignment,
+  CellStyleAlignmentPatch,
   CellBorderDefinition,
   CellBorderPatch,
   CellEntry,
@@ -127,6 +129,16 @@ export class Sheet {
     return this.workbook.getStyle(styleId ?? 0);
   }
 
+  getAlignment(address: string): CellStyleAlignment | null;
+  getAlignment(rowNumber: number, column: number | string): CellStyleAlignment | null;
+  getAlignment(addressOrRowNumber: string | number, column?: number | string): CellStyleAlignment | null {
+    const style =
+      typeof addressOrRowNumber === "number"
+        ? this.getStyle(addressOrRowNumber, column!)
+        : this.getStyle(addressOrRowNumber);
+    return style?.alignment ?? null;
+  }
+
   getFont(address: string): CellFontDefinition | null;
   getFont(rowNumber: number, column: number | string): CellFontDefinition | null;
   getFont(addressOrRowNumber: string | number, column?: number | string): CellFontDefinition | null {
@@ -211,6 +223,26 @@ export class Sheet {
     }
 
     return this.cloneStyle(addressOrRowNumber, (columnOrPatch as CellStylePatch | undefined) ?? {});
+  }
+
+  setAlignment(address: string, patch: CellStyleAlignmentPatch | null): number;
+  setAlignment(rowNumber: number, column: number | string, patch: CellStyleAlignmentPatch | null): number;
+  setAlignment(
+    addressOrRowNumber: string | number,
+    columnOrPatch: number | string | CellStyleAlignmentPatch | null,
+    patch?: CellStyleAlignmentPatch | null,
+  ): number {
+    const normalizedAddress = resolveCellAddress(
+      addressOrRowNumber,
+      typeof addressOrRowNumber === "number" ? (columnOrPatch as number | string) : undefined,
+    );
+    const nextPatch = resolveSetAlignmentPatch(addressOrRowNumber, columnOrPatch, patch);
+    const nextStyleId = this.workbook.cloneStyle(this.getStyleId(normalizedAddress) ?? 0, {
+      alignment: nextPatch,
+      applyAlignment: nextPatch === null ? null : true,
+    });
+    this.setStyleId(normalizedAddress, nextStyleId);
+    return nextStyleId;
   }
 
   setFont(address: string, patch: CellFontPatch): number;
@@ -4277,6 +4309,18 @@ function resolveCloneStylePatch(
   patch: CellStylePatch | undefined,
 ): CellStylePatch {
   return typeof addressOrRowNumber === "number" ? (patch ?? {}) : ((columnOrPatch as CellStylePatch | undefined) ?? {});
+}
+
+function resolveSetAlignmentPatch(
+  addressOrRowNumber: string | number,
+  columnOrPatch: number | string | CellStyleAlignmentPatch | null,
+  patch: CellStyleAlignmentPatch | null | undefined,
+): CellStyleAlignmentPatch | null {
+  if (typeof addressOrRowNumber === "number") {
+    return patch === undefined ? {} : patch;
+  }
+
+  return columnOrPatch as CellStyleAlignmentPatch | null;
 }
 
 function resolveSetFontPatch(

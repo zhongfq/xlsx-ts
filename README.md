@@ -135,9 +135,9 @@ await workbook.save("output.xlsx");
 - 后续 `getCell` / `getFormula` 会直接走索引查找，不再每次整张表做字符串匹配
 - 每次写入后会重建该表索引，保证后续读取拿到的是最新结果
 - 修改工作表后会同步维护 `<dimension ref="...">`，避免使用范围信息过期
-- `deleteRow()` / `deleteColumn()` 当前会同步更新本 sheet 的单元格坐标、公式引用、合并区域和 `dimension`
-- `insertRow()` 当前会同步更新本 sheet 的单元格坐标、公式引用、合并区域和 `dimension`
-- `insertColumn()` 当前会同步更新本 sheet 的单元格坐标、公式引用、合并区域和 `dimension`
+- `deleteRow()` / `deleteColumn()` 当前会同步更新本 sheet 的单元格坐标、公式引用、合并区域、`dimension`，以及其它 sheet 里显式引用它的公式
+- `insertRow()` 当前会同步更新本 sheet 的单元格坐标、公式引用、合并区域、`dimension`，以及其它 sheet 里显式引用它的公式
+- `insertColumn()` 当前会同步更新本 sheet 的单元格坐标、公式引用、合并区域、`dimension`，以及其它 sheet 里显式引用它的公式
 
 ## 当前限制
 

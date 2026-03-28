@@ -245,6 +245,48 @@ test("insertRow shifts cell addresses, formulas, and merged ranges together", as
   assert.match(sheetXml, /<dimension ref="A1:B4"\/>/);
 });
 
+test("insertColumn updates formulas in other sheets that reference the edited sheet", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = withSecondSheet(
+    replaceEntryText(
+      await loadFixtureEntries(fixtureDir),
+      "xl/worksheets/sheet1.xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1"><v>1</v></c>
+      <c r="B1"><v>2</v></c>
+    </row>
+  </sheetData>
+</worksheet>`,
+    ),
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1"><f>SUM(Sheet1!A1:B1)</f><v>3</v></c>
+    </row>
+    <row r="2">
+      <c r="A2"><f>Sheet1!B1</f><v>2</v></c>
+    </row>
+  </sheetData>
+</worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet1 = workbook.getSheet("Sheet1");
+  const sheet2 = workbook.getSheet("Sheet2");
+
+  sheet1.insertColumn("B");
+
+  assert.equal(sheet2.getFormula("A1"), "SUM(Sheet1!A1:C1)");
+  assert.equal(sheet2.getFormula("A2"), "Sheet1!C1");
+
+  const sheet2Xml = entryText(workbook.toEntries(), "xl/worksheets/sheet2.xml");
+  assert.match(sheet2Xml, /<c r="A1"><f>SUM\(Sheet1!A1:C1\)<\/f><v>3<\/v><\/c>/);
+  assert.match(sheet2Xml, /<c r="A2"><f>Sheet1!C1<\/f><v>2<\/v><\/c>/);
+});
+
 test("deleteColumn shifts cells, shrinks ranges, and emits #REF! for deleted refs", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = replaceEntryText(
@@ -287,6 +329,60 @@ test("deleteColumn shifts cells, shrinks ranges, and emits #REF! for deleted ref
   assert.match(sheetXml, /<c r="B1"><f>SUM\(A1:C1\)<\/f><v>10<\/v><\/c>/);
   assert.match(sheetXml, /<c r="C1"><f>#REF!<\/f><v>2<\/v><\/c>/);
   assert.match(sheetXml, /<mergeCell ref="B2:C2"\/>/);
+});
+
+test("deleteRow updates formulas in other sheets that reference the edited sheet", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = withSecondSheet(
+    replaceEntryText(
+      await loadFixtureEntries(fixtureDir),
+      "xl/worksheets/sheet1.xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1"><v>1</v></c>
+      <c r="B1"><v>2</v></c>
+    </row>
+    <row r="2">
+      <c r="A2"><v>3</v></c>
+      <c r="B2"><v>4</v></c>
+    </row>
+    <row r="3">
+      <c r="A3"><v>5</v></c>
+      <c r="B3"><v>6</v></c>
+    </row>
+    <row r="4">
+      <c r="A4"><v>7</v></c>
+      <c r="B4"><v>8</v></c>
+    </row>
+  </sheetData>
+</worksheet>`,
+    ),
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1"><f>SUM(Sheet1!A1:B4)</f><v>36</v></c>
+    </row>
+    <row r="2">
+      <c r="A2"><f>Sheet1!A2</f><v>3</v></c>
+    </row>
+  </sheetData>
+</worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet1 = workbook.getSheet("Sheet1");
+  const sheet2 = workbook.getSheet("Sheet2");
+
+  sheet1.deleteRow(2);
+
+  assert.equal(sheet2.getFormula("A1"), "SUM(Sheet1!A1:B3)");
+  assert.equal(sheet2.getFormula("A2"), "#REF!");
+
+  const sheet2Xml = entryText(workbook.toEntries(), "xl/worksheets/sheet2.xml");
+  assert.match(sheet2Xml, /<c r="A1"><f>SUM\(Sheet1!A1:B3\)<\/f><v>36<\/v><\/c>/);
+  assert.match(sheet2Xml, /<c r="A2"><f>#REF!<\/f><v>3<\/v><\/c>/);
 });
 
 test("deleteRow shifts cells, shrinks ranges, and emits #REF! for deleted refs", async () => {
@@ -684,4 +780,52 @@ function replaceEntryText(
   }
 
   return nextEntries;
+}
+
+function withSecondSheet(
+  entries: Array<{ path: string; data: Uint8Array }>,
+  sheetXml: string,
+): Array<{ path: string; data: Uint8Array }> {
+  const encoder = new TextEncoder();
+
+  return [
+    ...replaceEntryText(
+      replaceEntryText(
+        replaceEntryText(
+          entries,
+          "xl/workbook.xml",
+          `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+    <sheet name="Sheet2" sheetId="2" r:id="rId3"/>
+  </sheets>
+</workbook>`,
+        ),
+        "xl/_rels/workbook.xml.rels",
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>
+</Relationships>`,
+      ),
+      "[Content_Types].xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>`,
+    ),
+    {
+      path: "xl/worksheets/sheet2.xml",
+      data: encoder.encode(sheetXml),
+    },
+  ].sort((left, right) => left.path.localeCompare(right.path));
 }

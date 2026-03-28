@@ -268,6 +268,9 @@ export class Sheet {
 
     nextSheetXml = updateMergedRanges(nextSheetXml, nextMergedRanges);
     this.writeSheetXml(nextSheetXml);
+    this.syncReferencedFormulasInOtherSheets((formula) =>
+      shiftFormulaReferences(formula, this.name, 0, 0, rowNumber, count, false),
+    );
   }
 
   insertColumn(column: number | string, count = 1): void {
@@ -300,6 +303,9 @@ export class Sheet {
 
     nextSheetXml = updateMergedRanges(nextSheetXml, nextMergedRanges);
     this.writeSheetXml(nextSheetXml);
+    this.syncReferencedFormulasInOtherSheets((formula) =>
+      shiftFormulaReferences(formula, this.name, columnNumber, count, 0, 0, false),
+    );
   }
 
   deleteRow(rowNumber: number, count = 1): void {
@@ -330,6 +336,9 @@ export class Sheet {
 
     nextSheetXml = updateMergedRanges(nextSheetXml, nextMergedRanges);
     this.writeSheetXml(nextSheetXml);
+    this.syncReferencedFormulasInOtherSheets((formula) =>
+      deleteFormulaReferences(formula, this.name, 0, 0, rowNumber, count, false),
+    );
   }
 
   deleteColumn(column: number | string, count = 1): void {
@@ -354,6 +363,9 @@ export class Sheet {
 
     nextSheetXml = updateMergedRanges(nextSheetXml, nextMergedRanges);
     this.writeSheetXml(nextSheetXml);
+    this.syncReferencedFormulasInOtherSheets((formula) =>
+      deleteFormulaReferences(formula, this.name, columnNumber, count, 0, 0, false),
+    );
   }
 
   setCell(address: string, value: CellValue): void {
@@ -634,6 +646,38 @@ export class Sheet {
       : insertCell(index, address, cellXml);
 
     this.writeSheetXml(nextSheetXml);
+  }
+
+  private syncReferencedFormulasInOtherSheets(
+    transformFormula: (formula: string) => string,
+  ): void {
+    for (const sheet of this.workbook.getSheets()) {
+      if (sheet.path === this.path) {
+        continue;
+      }
+
+      sheet.rewriteFormulaTexts(transformFormula);
+    }
+  }
+
+  private rewriteFormulaTexts(transformFormula: (formula: string) => string): void {
+    const sheetXml = this.getSheetIndex().xml;
+    let changed = false;
+    const nextSheetXml = sheetXml.replace(/<f\b([^>]*)>([\s\S]*?)<\/f>/g, (match, attributesSource, formulaSource) => {
+      const formula = decodeXmlText(formulaSource);
+      const nextFormula = transformFormula(formula);
+
+      if (nextFormula === formula) {
+        return match;
+      }
+
+      changed = true;
+      return `<f${attributesSource}>${escapeXmlText(nextFormula)}</f>`;
+    });
+
+    if (changed) {
+      this.writeSheetXml(nextSheetXml);
+    }
   }
 
   private writeSheetXml(nextSheetXml: string): void {
@@ -1475,6 +1519,7 @@ function shiftFormulaReferences(
   columnCount: number,
   targetRowNumber: number,
   rowCount: number,
+  includeUnqualifiedReferences = true,
 ): string {
   let nextFormula = "";
   let cursor = 0;
@@ -1504,6 +1549,54 @@ function shiftFormulaReferences(
     }
 
     const remaining = formula.slice(cursor);
+    const rangeMatch = remaining.match(
+      /^((?:'[^']+'|[A-Za-z_][A-Za-z0-9_.]*)!)?(\$?)([A-Z]+)(\$?)(\d+):((?:'[^']+'|[A-Za-z_][A-Za-z0-9_.]*)!)?(\$?)([A-Z]+)(\$?)(\d+)/,
+    );
+    const previous = formula[cursor - 1];
+
+    if (rangeMatch) {
+      const [
+        fullMatch,
+        startSheetRef,
+        startColumnDollar,
+        startColumnLabel,
+        startRowDollar,
+        startRowText,
+        endSheetRef,
+        endColumnDollar,
+        endColumnLabel,
+        endRowDollar,
+        endRowText,
+      ] = rangeMatch;
+
+      if (
+        !matchesFormulaReference(startSheetRef, currentSheetName, includeUnqualifiedReferences, previous) ||
+        (endSheetRef !== undefined && !matchesSheetReference(endSheetRef, currentSheetName))
+      ) {
+        nextFormula += fullMatch;
+        cursor += fullMatch.length;
+        continue;
+      }
+
+      const nextStartColumn = shiftColumnNumber(
+        columnLabelToNumber(startColumnLabel),
+        targetColumnNumber,
+        columnCount,
+      );
+      const nextEndColumn = shiftColumnNumber(
+        columnLabelToNumber(endColumnLabel),
+        targetColumnNumber,
+        columnCount,
+      );
+      const nextStartRow = shiftRowNumber(Number(startRowText), targetRowNumber, rowCount);
+      const nextEndRow = shiftRowNumber(Number(endRowText), targetRowNumber, rowCount);
+      const leftRef = `${startSheetRef ?? ""}${startColumnDollar}${numberToColumnLabel(nextStartColumn)}${startRowDollar}${nextStartRow}`;
+      const rightRef = `${endSheetRef ?? ""}${endColumnDollar}${numberToColumnLabel(nextEndColumn)}${endRowDollar}${nextEndRow}`;
+      nextFormula += `${leftRef}:${rightRef}`;
+      cursor += fullMatch.length;
+      continue;
+    }
+
     const match = remaining.match(/^((?:'[^']+'|[A-Za-z_][A-Za-z0-9_.]*)!)?(\$?)([A-Z]+)(\$?)(\d+)/);
 
     if (!match) {
@@ -1513,9 +1606,8 @@ function shiftFormulaReferences(
     }
 
     const [fullMatch, sheetRef, columnDollar, columnLabel, rowDollar, rowNumber] = match;
-    const previous = formula[cursor - 1];
 
-    if ((!sheetRef && previous && /[A-Za-z0-9_.]/.test(previous)) || !matchesCurrentSheetReference(sheetRef, currentSheetName)) {
+    if (!matchesFormulaReference(sheetRef, currentSheetName, includeUnqualifiedReferences, previous)) {
       nextFormula += fullMatch;
       cursor += fullMatch.length;
       continue;
@@ -1538,6 +1630,7 @@ function deleteFormulaReferences(
   columnCount: number,
   targetRowNumber: number,
   rowCount: number,
+  includeUnqualifiedReferences = true,
 ): string {
   let nextFormula = "";
   let cursor = 0;
@@ -1588,9 +1681,13 @@ function deleteFormulaReferences(
       const previous = formula[cursor - 1];
 
       if (
-        (!startSheetRef && previous && /[A-Za-z0-9_.]/.test(previous)) ||
-        !matchesCurrentSheetReference(startSheetRef, currentSheetName) ||
-        (endSheetRef !== undefined && !matchesCurrentSheetReference(endSheetRef, currentSheetName))
+        !matchesFormulaReference(
+          startSheetRef,
+          currentSheetName,
+          includeUnqualifiedReferences,
+          previous,
+        ) ||
+        (endSheetRef !== undefined && !matchesSheetReference(endSheetRef, currentSheetName))
       ) {
         nextFormula += fullMatch;
         cursor += fullMatch.length;
@@ -1633,7 +1730,14 @@ function deleteFormulaReferences(
     const [fullMatch, sheetRef, columnDollar, columnLabel, rowDollar, rowText] = refMatch;
     const previous = formula[cursor - 1];
 
-    if ((!sheetRef && previous && /[A-Za-z0-9_.]/.test(previous)) || !matchesCurrentSheetReference(sheetRef, currentSheetName)) {
+    if (
+      !matchesFormulaReference(
+        sheetRef,
+        currentSheetName,
+        includeUnqualifiedReferences,
+        previous,
+      )
+    ) {
       nextFormula += fullMatch;
       cursor += fullMatch.length;
       continue;
@@ -1654,9 +1758,22 @@ function deleteFormulaReferences(
   return nextFormula;
 }
 
-function matchesCurrentSheetReference(sheetRef: string | undefined, currentSheetName: string): boolean {
+function matchesFormulaReference(
+  sheetRef: string | undefined,
+  targetSheetName: string,
+  includeUnqualifiedReferences: boolean,
+  previousCharacter: string | undefined,
+): boolean {
   if (!sheetRef) {
-    return true;
+    return includeUnqualifiedReferences && !(previousCharacter && /[A-Za-z0-9_.]/.test(previousCharacter));
+  }
+
+  return matchesSheetReference(sheetRef, targetSheetName);
+}
+
+function matchesSheetReference(sheetRef: string | undefined, targetSheetName: string): boolean {
+  if (!sheetRef) {
+    return false;
   }
 
   const rawSheetName = sheetRef.slice(0, -1);
@@ -1665,7 +1782,7 @@ function matchesCurrentSheetReference(sheetRef: string | undefined, currentSheet
       ? rawSheetName.slice(1, -1).replaceAll("''", "'")
       : rawSheetName;
 
-  return normalizedSheetName === currentSheetName;
+  return normalizedSheetName === targetSheetName;
 }
 
 function parseMergedRanges(sheetXml: string): string[] {

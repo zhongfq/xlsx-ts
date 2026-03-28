@@ -123,6 +123,8 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `sheet.setFont(rowNumber, column, patch)`
 - `sheet.setStyle(address, patch)`
 - `sheet.setStyle(rowNumber, column, patch)`
+- `sheet.setRowStyle(rowNumber, patch)`
+- `sheet.setColumnStyle(column, patch)`
 - `sheet.cloneStyle(address, patch?)`
 - `sheet.cloneStyle(rowNumber, column, patch?)`
 - `sheet.cloneRowStyle(rowNumber, patch?)`
@@ -305,6 +307,7 @@ Notes:
 - `sheet.getStyleId()` and `setStyleId()` still only read and write the cell-level `s="..."` style index itself.
 - `sheet.getRowStyleId()` and `setRowStyleId()` currently read and write the row-level `<row s="..." customFormat="1">` style index; that layer still does not modify `styles.xml`.
 - `sheet.getRowStyle()` and `sheet.getColumnStyle()` resolve the currently assigned row/column style definition; they return `null` when no explicit row/column style is present.
+- `sheet.setRowStyle()` and `sheet.setColumnStyle()` are convenience entry points for row/column style edits. They reuse the same clone semantics: derive a new `styleId` from the current row/column style and apply it immediately.
 - `sheet.cloneRowStyle()` and `sheet.cloneColumnStyle()` clone the current row/column style into a new `styleId` and apply it immediately; when no explicit row/column style exists yet, they clone from the default style `0`.
 - `sheet.getColumnStyleId()` and `setColumnStyleId()` currently read and write the column-level `<cols><col ... style="..."/>` style index, and those ranges are shifted during column insert/delete operations.
 - `sheet.copyStyle()` currently copies the source cell's `styleId` onto the target cell without changing the target cell's value or formula; both address and `(rowNumber, column)` calls are supported.

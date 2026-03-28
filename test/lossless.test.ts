@@ -1148,11 +1148,27 @@ test("row and column style definition APIs read and clone style definitions", as
       horizontal: "center",
     },
   });
+  const rowSetStyleId = sheet.setRowStyle(4, {
+    applyAlignment: true,
+    alignment: {
+      horizontal: "left",
+    },
+  });
+  const columnSetStyleId = sheet.setColumnStyle("D", {
+    applyAlignment: true,
+    alignment: {
+      horizontal: "justify",
+    },
+  });
 
   assert.equal(rowStyleId, 2);
   assert.equal(columnStyleId, 3);
+  assert.equal(rowSetStyleId, 4);
+  assert.equal(columnSetStyleId, 5);
   assert.equal(sheet.getRowStyleId(3), 2);
+  assert.equal(sheet.getRowStyleId(4), 4);
   assert.equal(sheet.getColumnStyleId("C"), 3);
+  assert.equal(sheet.getColumnStyleId("D"), 5);
   assert.deepEqual(sheet.getRowStyle(3), {
     numFmtId: 0,
     fontId: 0,
@@ -1189,14 +1205,51 @@ test("row and column style definition APIs read and clone style definitions", as
       horizontal: "center",
     },
   });
+  assert.deepEqual(sheet.getRowStyle(4), {
+    numFmtId: 0,
+    fontId: 0,
+    fillId: 0,
+    borderId: 0,
+    xfId: 0,
+    quotePrefix: null,
+    pivotButton: null,
+    applyNumberFormat: null,
+    applyFont: null,
+    applyFill: null,
+    applyBorder: null,
+    applyAlignment: true,
+    applyProtection: null,
+    alignment: {
+      horizontal: "left",
+    },
+  });
+  assert.deepEqual(sheet.getColumnStyle("D"), {
+    numFmtId: 0,
+    fontId: 0,
+    fillId: 0,
+    borderId: 0,
+    xfId: 0,
+    quotePrefix: null,
+    pivotButton: null,
+    applyNumberFormat: null,
+    applyFont: null,
+    applyFill: null,
+    applyBorder: null,
+    applyAlignment: true,
+    applyProtection: null,
+    alignment: {
+      horizontal: "justify",
+    },
+  });
 
   const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
   const stylesXml = entryText(workbook.toEntries(), "xl/styles.xml");
 
   assert.match(sheetXml, /<row r="2" s="1" customFormat="1"\/>/);
   assert.match(sheetXml, /<row r="3" s="2" customFormat="1"\/>/);
-  assert.match(sheetXml, /<cols><col min="2" max="2" style="1"\/><col min="3" max="3" style="3"\/><\/cols>/);
-  assert.match(stylesXml, /<cellXfs count="4">/);
+  assert.match(sheetXml, /<row r="4" s="4" customFormat="1"\/>/);
+  assert.match(sheetXml, /<cols><col min="2" max="2" style="1"\/><col min="3" max="3" style="3"\/><col min="4" max="4" style="5"\/><\/cols>/);
+  assert.match(stylesXml, /<cellXfs count="6">/);
 });
 
 test("column style id APIs read, write, and shift with column edits", async () => {

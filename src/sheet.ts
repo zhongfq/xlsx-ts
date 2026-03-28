@@ -1016,6 +1016,10 @@ export class Sheet {
     }
   }
 
+  setColumnStyle(column: number | string, patch: CellStylePatch): number {
+    return this.cloneColumnStyle(column, patch);
+  }
+
   cloneColumnStyle(column: number | string, patch: CellStylePatch = {}): number {
     const nextStyleId = this.workbook.cloneStyle(this.getColumnStyleId(column) ?? 0, patch);
     this.setColumnStyleId(column, nextStyleId);
@@ -1108,6 +1112,10 @@ export class Sheet {
         buildStyledRowXml(index.xml, row, styleId) +
         index.xml.slice(row.end),
     );
+  }
+
+  setRowStyle(rowNumber: number, patch: CellStylePatch): number {
+    return this.cloneRowStyle(rowNumber, patch);
   }
 
   cloneRowStyle(rowNumber: number, patch: CellStylePatch = {}): number {

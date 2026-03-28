@@ -118,6 +118,8 @@
 - `sheet.setFont(rowNumber, column, patch)`
 - `sheet.setStyle(address, patch)`
 - `sheet.setStyle(rowNumber, column, patch)`
+- `sheet.setRowStyle(rowNumber, patch)`
+- `sheet.setColumnStyle(column, patch)`
 - `sheet.cloneStyle(address, patch?)`
 - `sheet.cloneStyle(rowNumber, column, patch?)`
 - `sheet.cloneRowStyle(rowNumber, patch?)`
@@ -300,6 +302,7 @@ await workbook.save("output.xlsx");
 - `sheet.getStyleId()` / `setStyleId()` 仍然只负责读写单元格上的 `s="..."` 样式索引
 - `sheet.getRowStyleId()` / `setRowStyleId()` 当前读写 `<row s="..." customFormat="1">` 这一层的行级样式索引；这一层本身不会修改 `styles.xml`
 - `sheet.getRowStyle()` / `sheet.getColumnStyle()` 会把行/列当前引用的样式索引解析成样式定义；如果该行/列没有显式样式，返回 `null`
+- `sheet.setRowStyle()` / `sheet.setColumnStyle()` 是行列级的便捷入口，会复用现有 clone 语义：基于当前行/列样式克隆一个新 `styleId`，再立刻应用回去
 - `sheet.cloneRowStyle()` / `sheet.cloneColumnStyle()` 会基于当前行/列样式克隆出一个新的 `styleId` 并立即应用；如果当前没有显式样式，会从默认样式 `0` 克隆
 - `sheet.getColumnStyleId()` / `setColumnStyleId()` 当前读写 `<cols><col ... style="..."/>` 这一层的列级样式索引；插删列时这些范围也会一起跟着移动
 - `sheet.copyStyle()` 当前会把源单元格的 `styleId` 复制到目标单元格，不会改动目标单元格的值或公式；同样支持地址和 `(rowNumber, column)` 两种调用

@@ -63,6 +63,8 @@
 - `sheet.getUsedRange()`
 - `sheet.getMergedRanges()`
 - `sheet.setCell(address, value)`
+- `sheet.deleteRow(row, count?)`
+- `sheet.deleteColumn(column, count?)`
 - `sheet.insertRow(row, count?)`
 - `sheet.insertColumn(column, count?)`
 - `sheet.setHeaders(headers, headerRowNumber?, startColumn?)`
@@ -91,6 +93,8 @@ const sheet = workbook.getSheet("Sheet1");
 const scoreCell = sheet.cell("B2");
 
 sheet.setCell("A1", "Hello");
+sheet.deleteRow(8);
+sheet.deleteColumn("G");
 sheet.insertRow(2);
 sheet.setHeaders(["Name", "Score"]);
 sheet.insertColumn("B");
@@ -131,6 +135,7 @@ await workbook.save("output.xlsx");
 - 后续 `getCell` / `getFormula` 会直接走索引查找，不再每次整张表做字符串匹配
 - 每次写入后会重建该表索引，保证后续读取拿到的是最新结果
 - 修改工作表后会同步维护 `<dimension ref="...">`，避免使用范围信息过期
+- `deleteRow()` / `deleteColumn()` 当前会同步更新本 sheet 的单元格坐标、公式引用、合并区域和 `dimension`
 - `insertRow()` 当前会同步更新本 sheet 的单元格坐标、公式引用、合并区域和 `dimension`
 - `insertColumn()` 当前会同步更新本 sheet 的单元格坐标、公式引用、合并区域和 `dimension`
 

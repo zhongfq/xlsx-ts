@@ -302,6 +302,60 @@ export class Sheet {
     this.writeSheetXml(nextSheetXml);
   }
 
+  deleteRow(rowNumber: number, count = 1): void {
+    assertRowNumber(rowNumber);
+    assertInsertCount(count);
+
+    const index = this.getSheetIndex();
+    const deleteEndRow = rowNumber + count - 1;
+    let nextSheetXml = index.xml;
+    const nextMergedRanges = this.getMergedRanges()
+      .map((range) => deleteRangeRefRows(range, rowNumber, count))
+      .filter((range): range is string => range !== null);
+
+    for (const sourceRowNumber of [...index.rowNumbers].sort((left, right) => right - left)) {
+      const row = index.rows.get(sourceRowNumber);
+      if (!row) {
+        continue;
+      }
+
+      if (sourceRowNumber >= rowNumber && sourceRowNumber <= deleteEndRow) {
+        nextSheetXml = nextSheetXml.slice(0, row.start) + nextSheetXml.slice(row.end);
+        continue;
+      }
+
+      const nextRowXml = deleteRowTransform(index.xml, row, this.name, rowNumber, count);
+      nextSheetXml = nextSheetXml.slice(0, row.start) + nextRowXml + nextSheetXml.slice(row.end);
+    }
+
+    nextSheetXml = updateMergedRanges(nextSheetXml, nextMergedRanges);
+    this.writeSheetXml(nextSheetXml);
+  }
+
+  deleteColumn(column: number | string, count = 1): void {
+    const columnNumber = normalizeColumnNumber(column);
+    assertInsertCount(count);
+
+    const index = this.getSheetIndex();
+    let nextSheetXml = index.xml;
+    const nextMergedRanges = this.getMergedRanges()
+      .map((range) => deleteRangeRefColumns(range, columnNumber, count))
+      .filter((range): range is string => range !== null);
+
+    for (const rowNumber of [...index.rowNumbers].sort((left, right) => right - left)) {
+      const row = index.rows.get(rowNumber);
+      if (!row) {
+        continue;
+      }
+
+      const nextRowXml = deleteColumnTransform(index.xml, row, this.name, columnNumber, count);
+      nextSheetXml = nextSheetXml.slice(0, row.start) + nextRowXml + nextSheetXml.slice(row.end);
+    }
+
+    nextSheetXml = updateMergedRanges(nextSheetXml, nextMergedRanges);
+    this.writeSheetXml(nextSheetXml);
+  }
+
   setCell(address: string, value: CellValue): void {
     const normalizedAddress = normalizeCellAddress(address);
     const existingCell = this.getSheetIndex().cells.get(normalizedAddress);
@@ -870,6 +924,153 @@ function transformCellXml(
   return `${nextCellOpenTag}>${nextInnerXml}</c>`;
 }
 
+function deleteRowTransform(
+  sheetXml: string,
+  row: LocatedRow,
+  sheetName: string,
+  targetRowNumber: number,
+  count: number,
+): string {
+  const nextRowNumber = deleteShiftRowNumber(row.rowNumber, targetRowNumber, count);
+  const rowAttributes = parseAttributes(row.attributesSource)
+    .filter(([name]) => name !== "r")
+    .map(([name, value]) => [name, value] as [string, string]);
+  const nextRowAttributes: Array<[string, string]> = [["r", String(nextRowNumber)], ...rowAttributes];
+
+  if (row.selfClosing || row.cells.length === 0) {
+    return `<row ${serializeAttributes(nextRowAttributes)}/>`;
+  }
+
+  const nextCells = row.cells.map((cell) =>
+    deleteRowCellTransform(sheetXml.slice(cell.start, cell.end), cell, sheetName, targetRowNumber, count),
+  );
+  return `<row ${serializeAttributes(nextRowAttributes)}>${nextCells.join("")}</row>`;
+}
+
+function deleteColumnTransform(
+  sheetXml: string,
+  row: LocatedRow,
+  sheetName: string,
+  targetColumnNumber: number,
+  count: number,
+): string {
+  const keptCells = row.cells
+    .filter((cell) => !isColumnDeleted(cell.columnNumber, targetColumnNumber, count))
+    .map((cell) => ({
+      columnNumber: deleteShiftColumnNumber(cell.columnNumber, targetColumnNumber, count),
+      xml: deleteColumnCellTransform(sheetXml.slice(cell.start, cell.end), cell, sheetName, targetColumnNumber, count),
+    }));
+
+  const baseAttributes = parseAttributes(row.attributesSource)
+    .filter(([name]) => name !== "spans")
+    .map(([name, value]) => [name, value] as [string, string]);
+
+  if (keptCells.length === 0) {
+    return `<row ${serializeAttributes(baseAttributes)}/>`;
+  }
+
+  const nextAttributes = [...baseAttributes];
+  const spansIndex = nextAttributes.findIndex(([name]) => name === "spans");
+  const spansValue = `${keptCells[0].columnNumber}:${keptCells[keptCells.length - 1].columnNumber}`;
+
+  if (spansIndex === -1) {
+    nextAttributes.push(["spans", spansValue]);
+  } else {
+    nextAttributes[spansIndex] = ["spans", spansValue];
+  }
+
+  return `<row ${serializeAttributes(nextAttributes)}>${keptCells.map((cell) => cell.xml).join("")}</row>`;
+}
+
+function deleteRowCellTransform(
+  cellXml: string,
+  cell: LocatedCell,
+  sheetName: string,
+  targetRowNumber: number,
+  count: number,
+): string {
+  const attributes = parseAttributes(cell.attributesSource).map(([name, value]) => {
+    if (name === "r") {
+      const { columnNumber, rowNumber } = splitCellAddress(value);
+      return [name, makeCellAddress(deleteShiftRowNumber(rowNumber, targetRowNumber, count), columnNumber)] as [string, string];
+    }
+
+    return [name, value] as [string, string];
+  });
+
+  return deleteTransformCellInnerXml(cellXml, attributes, sheetName, 0, 0, targetRowNumber, count);
+}
+
+function deleteColumnCellTransform(
+  cellXml: string,
+  cell: LocatedCell,
+  sheetName: string,
+  targetColumnNumber: number,
+  count: number,
+): string {
+  const attributes = parseAttributes(cell.attributesSource).map(([name, value]) => {
+    if (name === "r") {
+      const { rowNumber, columnNumber } = splitCellAddress(value);
+      return [name, makeCellAddress(rowNumber, deleteShiftColumnNumber(columnNumber, targetColumnNumber, count))] as [string, string];
+    }
+
+    return [name, value] as [string, string];
+  });
+
+  return deleteTransformCellInnerXml(cellXml, attributes, sheetName, targetColumnNumber, count, 0, 0);
+}
+
+function deleteTransformCellInnerXml(
+  cellXml: string,
+  attributes: Array<[string, string]>,
+  sheetName: string,
+  targetColumnNumber: number,
+  columnCount: number,
+  targetRowNumber: number,
+  rowCount: number,
+): string {
+  const cellOpenTag = `<c ${serializeAttributes(attributes)}`;
+  if (!cellXml.includes("</c>")) {
+    return `${cellOpenTag}/>`;
+  }
+
+  const innerStart = cellXml.indexOf(">") + 1;
+  const innerEnd = cellXml.lastIndexOf("</c>");
+  let nextInnerXml = cellXml.slice(innerStart, innerEnd);
+
+  nextInnerXml = nextInnerXml.replace(/<f\b([^>]*)>([\s\S]*?)<\/f>/g, (_match, attributesSource, formulaSource) => {
+    const formulaAttributes = parseAttributes(attributesSource);
+    const nextFormulaAttributes = formulaAttributes.map(([name, value]) => {
+      if (name === "ref") {
+        const nextRange = deleteRangeRef(
+          value,
+          targetColumnNumber,
+          columnCount,
+          targetRowNumber,
+          rowCount,
+        );
+
+        return nextRange === null ? [name, "#REF!"] as [string, string] : [name, nextRange] as [string, string];
+      }
+
+      return [name, value] as [string, string];
+    });
+
+    const nextFormula = deleteFormulaReferences(
+      decodeXmlText(formulaSource),
+      sheetName,
+      targetColumnNumber,
+      columnCount,
+      targetRowNumber,
+      rowCount,
+    );
+    const serializedAttributes = serializeAttributes(nextFormulaAttributes);
+    return `<f${serializedAttributes ? ` ${serializedAttributes}` : ""}>${escapeXmlText(nextFormula)}</f>`;
+  });
+
+  return `${cellOpenTag}>${nextInnerXml}</c>`;
+}
+
 function insertCell(sheetIndex: SheetIndex, address: string, cellXml: string): string {
   const { rowNumber, columnNumber } = splitCellAddress(address);
   const row = sheetIndex.rows.get(rowNumber);
@@ -1153,6 +1354,14 @@ function shiftRangeRefRows(range: string, targetRowNumber: number, count: number
   return shiftRangeRef(range, 0, 0, targetRowNumber, count);
 }
 
+function deleteRangeRefColumns(range: string, targetColumnNumber: number, count: number): string | null {
+  return deleteRangeRef(range, targetColumnNumber, count, 0, 0);
+}
+
+function deleteRangeRefRows(range: string, targetRowNumber: number, count: number): string | null {
+  return deleteRangeRef(range, 0, 0, targetRowNumber, count);
+}
+
 function shiftColumnNumber(columnNumber: number, targetColumnNumber: number, count: number): number {
   if (targetColumnNumber <= 0 || count <= 0) {
     return columnNumber;
@@ -1167,6 +1376,85 @@ function shiftRowNumber(rowNumber: number, targetRowNumber: number, count: numbe
   }
 
   return rowNumber >= targetRowNumber ? rowNumber + count : rowNumber;
+}
+
+function deleteShiftColumnNumber(columnNumber: number, targetColumnNumber: number, count: number): number {
+  if (targetColumnNumber <= 0 || count <= 0) {
+    return columnNumber;
+  }
+
+  return columnNumber > targetColumnNumber + count - 1 ? columnNumber - count : columnNumber;
+}
+
+function deleteShiftRowNumber(rowNumber: number, targetRowNumber: number, count: number): number {
+  if (targetRowNumber <= 0 || count <= 0) {
+    return rowNumber;
+  }
+
+  return rowNumber > targetRowNumber + count - 1 ? rowNumber - count : rowNumber;
+}
+
+function isColumnDeleted(columnNumber: number, targetColumnNumber: number, count: number): boolean {
+  return targetColumnNumber > 0 && columnNumber >= targetColumnNumber && columnNumber <= targetColumnNumber + count - 1;
+}
+
+function isRowDeleted(rowNumber: number, targetRowNumber: number, count: number): boolean {
+  return targetRowNumber > 0 && rowNumber >= targetRowNumber && rowNumber <= targetRowNumber + count - 1;
+}
+
+function deleteRangeRef(
+  range: string,
+  targetColumnNumber: number,
+  columnCount: number,
+  targetRowNumber: number,
+  rowCount: number,
+): string | null {
+  const { startRow, endRow, startColumn, endColumn } = parseRangeRef(range);
+  const nextColumns = deleteRangeAxis(startColumn, endColumn, targetColumnNumber, columnCount);
+  const nextRows = deleteRangeAxis(startRow, endRow, targetRowNumber, rowCount);
+
+  if (!nextColumns || !nextRows) {
+    return null;
+  }
+
+  return formatRangeRef(nextRows.start, nextColumns.start, nextRows.end, nextColumns.end);
+}
+
+function deleteRangeAxis(
+  start: number,
+  end: number,
+  target: number,
+  count: number,
+): { start: number; end: number } | null {
+  if (target <= 0 || count <= 0) {
+    return { start, end };
+  }
+
+  const deleteEnd = target + count - 1;
+
+  if (end < target) {
+    return { start, end };
+  }
+
+  if (start > deleteEnd) {
+    return { start: start - count, end: end - count };
+  }
+
+  const hasLeft = start < target;
+  const hasRight = end > deleteEnd;
+
+  if (!hasLeft && !hasRight) {
+    return null;
+  }
+
+  const nextStart = hasLeft ? start : target;
+  const nextEnd = hasRight ? end - count : deleteEnd >= start ? target - 1 : end;
+
+  if (nextStart > nextEnd) {
+    return null;
+  }
+
+  return { start: nextStart, end: nextEnd };
 }
 
 function shiftRowSpans(spans: string, targetColumnNumber: number, count: number): string {
@@ -1237,6 +1525,129 @@ function shiftFormulaReferences(
     const nextColumnNumber = shiftColumnNumber(columnNumber, targetColumnNumber, columnCount);
     const nextRowNumber = shiftRowNumber(Number(rowNumber), targetRowNumber, rowCount);
     nextFormula += `${sheetRef ?? ""}${columnDollar}${numberToColumnLabel(nextColumnNumber)}${rowDollar}${String(nextRowNumber)}`;
+    cursor += fullMatch.length;
+  }
+
+  return nextFormula;
+}
+
+function deleteFormulaReferences(
+  formula: string,
+  currentSheetName: string,
+  targetColumnNumber: number,
+  columnCount: number,
+  targetRowNumber: number,
+  rowCount: number,
+): string {
+  let nextFormula = "";
+  let cursor = 0;
+  let inString = false;
+
+  while (cursor < formula.length) {
+    const character = formula[cursor];
+
+    if (character === "\"") {
+      nextFormula += character;
+
+      if (inString && formula[cursor + 1] === "\"") {
+        nextFormula += "\"";
+        cursor += 2;
+        continue;
+      }
+
+      inString = !inString;
+      cursor += 1;
+      continue;
+    }
+
+    if (inString) {
+      nextFormula += character;
+      cursor += 1;
+      continue;
+    }
+
+    const remaining = formula.slice(cursor);
+    const rangeMatch = remaining.match(
+      /^((?:'[^']+'|[A-Za-z_][A-Za-z0-9_.]*)!)?(\$?)([A-Z]+)(\$?)(\d+):((?:'[^']+'|[A-Za-z_][A-Za-z0-9_.]*)!)?(\$?)([A-Z]+)(\$?)(\d+)/,
+    );
+
+    if (rangeMatch) {
+      const [
+        fullMatch,
+        startSheetRef,
+        startColumnDollar,
+        startColumnLabel,
+        startRowDollar,
+        startRowText,
+        endSheetRef,
+        endColumnDollar,
+        endColumnLabel,
+        endRowDollar,
+        endRowText,
+      ] = rangeMatch;
+      const previous = formula[cursor - 1];
+
+      if (
+        (!startSheetRef && previous && /[A-Za-z0-9_.]/.test(previous)) ||
+        !matchesCurrentSheetReference(startSheetRef, currentSheetName) ||
+        (endSheetRef !== undefined && !matchesCurrentSheetReference(endSheetRef, currentSheetName))
+      ) {
+        nextFormula += fullMatch;
+        cursor += fullMatch.length;
+        continue;
+      }
+
+      const nextRange = deleteRangeAxis(
+        columnLabelToNumber(startColumnLabel),
+        columnLabelToNumber(endColumnLabel),
+        targetColumnNumber,
+        columnCount,
+      );
+      const nextRows = deleteRangeAxis(
+        Number(startRowText),
+        Number(endRowText),
+        targetRowNumber,
+        rowCount,
+      );
+
+      if (!nextRange || !nextRows) {
+        nextFormula += "#REF!";
+      } else {
+        const leftRef = `${startSheetRef ?? ""}${startColumnDollar}${numberToColumnLabel(nextRange.start)}${startRowDollar}${nextRows.start}`;
+        const rightPrefix = endSheetRef ?? "";
+        const rightRef = `${rightPrefix}${endColumnDollar}${numberToColumnLabel(nextRange.end)}${endRowDollar}${nextRows.end}`;
+        nextFormula += `${leftRef}:${rightRef}`;
+      }
+
+      cursor += fullMatch.length;
+      continue;
+    }
+
+    const refMatch = remaining.match(/^((?:'[^']+'|[A-Za-z_][A-Za-z0-9_.]*)!)?(\$?)([A-Z]+)(\$?)(\d+)/);
+    if (!refMatch) {
+      nextFormula += character;
+      cursor += 1;
+      continue;
+    }
+
+    const [fullMatch, sheetRef, columnDollar, columnLabel, rowDollar, rowText] = refMatch;
+    const previous = formula[cursor - 1];
+
+    if ((!sheetRef && previous && /[A-Za-z0-9_.]/.test(previous)) || !matchesCurrentSheetReference(sheetRef, currentSheetName)) {
+      nextFormula += fullMatch;
+      cursor += fullMatch.length;
+      continue;
+    }
+
+    const columnNumber = columnLabelToNumber(columnLabel);
+    const rowNumber = Number(rowText);
+
+    if (isColumnDeleted(columnNumber, targetColumnNumber, columnCount) || isRowDeleted(rowNumber, targetRowNumber, rowCount)) {
+      nextFormula += "#REF!";
+    } else {
+      nextFormula += `${sheetRef ?? ""}${columnDollar}${numberToColumnLabel(deleteShiftColumnNumber(columnNumber, targetColumnNumber, columnCount))}${rowDollar}${deleteShiftRowNumber(rowNumber, targetRowNumber, rowCount)}`;
+    }
+
     cursor += fullMatch.length;
   }
 

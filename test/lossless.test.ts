@@ -245,6 +245,94 @@ test("insertRow shifts cell addresses, formulas, and merged ranges together", as
   assert.match(sheetXml, /<dimension ref="A1:B4"\/>/);
 });
 
+test("deleteColumn shifts cells, shrinks ranges, and emits #REF! for deleted refs", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1:D2"/>
+  <sheetData>
+    <row r="1">
+      <c r="A1"><v>1</v></c>
+      <c r="B1"><v>2</v></c>
+      <c r="C1"><f>SUM(A1:D1)</f><v>10</v></c>
+      <c r="D1"><f>B1</f><v>2</v></c>
+    </row>
+    <row r="2">
+      <c r="B2"><v>4</v></c>
+      <c r="C2"><v>5</v></c>
+      <c r="D2"><v>6</v></c>
+    </row>
+  </sheetData>
+  <mergeCells count="1"><mergeCell ref="B2:D2"/></mergeCells>
+</worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.deleteColumn("B");
+
+  assert.equal(sheet.getCell("A1"), 1);
+  assert.equal(sheet.getCell("B1"), 10);
+  assert.equal(sheet.getFormula("B1"), "SUM(A1:C1)");
+  assert.equal(sheet.getCell("C1"), 2);
+  assert.equal(sheet.getFormula("C1"), "#REF!");
+  assert.deepEqual(sheet.getMergedRanges(), ["B2:C2"]);
+  assert.equal(sheet.getUsedRange(), "A1:C2");
+
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.doesNotMatch(sheetXml, /<c r="B2"><v>4<\/v><\/c>/);
+  assert.match(sheetXml, /<c r="B1"><f>SUM\(A1:C1\)<\/f><v>10<\/v><\/c>/);
+  assert.match(sheetXml, /<c r="C1"><f>#REF!<\/f><v>2<\/v><\/c>/);
+  assert.match(sheetXml, /<mergeCell ref="B2:C2"\/>/);
+});
+
+test("deleteRow shifts cells, shrinks ranges, and emits #REF! for deleted refs", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1:B4"/>
+  <sheetData>
+    <row r="1">
+      <c r="A1"><f>SUM(A1:B4)</f><v>1</v></c>
+    </row>
+    <row r="2">
+      <c r="A2"><v>2</v></c>
+    </row>
+    <row r="3">
+      <c r="A3"><f>A2</f><v>2</v></c>
+      <c r="B3"><v>3</v></c>
+    </row>
+    <row r="4">
+      <c r="A4"><v>4</v></c>
+      <c r="B4"><v>5</v></c>
+    </row>
+  </sheetData>
+  <mergeCells count="1"><mergeCell ref="A2:B4"/></mergeCells>
+</worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.deleteRow(2);
+
+  assert.equal(sheet.getFormula("A1"), "SUM(A1:B3)");
+  assert.equal(sheet.getFormula("A2"), "#REF!");
+  assert.equal(sheet.getCell("A3"), 4);
+  assert.deepEqual(sheet.getMergedRanges(), ["A2:B3"]);
+  assert.equal(sheet.getUsedRange(), "A1:B3");
+
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.doesNotMatch(sheetXml, /<row r="4">/);
+  assert.match(sheetXml, /<row r="2">[\s\S]*<c r="A2"><f>#REF!<\/f><v>2<\/v><\/c>[\s\S]*<c r="B2"><v>3<\/v><\/c>[\s\S]*<\/row>/);
+  assert.match(sheetXml, /<mergeCell ref="A2:B3"\/>/);
+});
+
 test("row APIs read sparse rows and write from a column offset", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = await loadFixtureEntries(fixtureDir);

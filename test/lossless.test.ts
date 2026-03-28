@@ -438,6 +438,118 @@ test("cell font APIs clone and apply fonts without mutating shared font ids", as
   assert.match(sheetXml, /<c r="B1" s="3" t="inlineStr"><is><t>World<\/t><\/is><\/c>/);
 });
 
+test("fill definition APIs read, clone, and update workbook fills", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = await loadFixtureEntries(fixtureDir);
+  const workbook = Workbook.fromEntries(entries);
+
+  assert.deepEqual(workbook.getFill(0), {
+    patternType: "none",
+    fgColor: null,
+    bgColor: null,
+  });
+  assert.deepEqual(workbook.getFill(1), {
+    patternType: "gray125",
+    fgColor: null,
+    bgColor: null,
+  });
+
+  const nextFillId = workbook.cloneFill(0, {
+    patternType: "solid",
+    fgColor: {
+      rgb: "FFFF0000",
+    },
+  });
+  workbook.updateFill(1, {
+    patternType: "solid",
+    fgColor: {
+      rgb: "FF00FF00",
+    },
+  });
+
+  assert.equal(nextFillId, 2);
+  assert.deepEqual(workbook.getFill(1), {
+    patternType: "solid",
+    fgColor: {
+      rgb: "FF00FF00",
+    },
+    bgColor: null,
+  });
+  assert.deepEqual(workbook.getFill(2), {
+    patternType: "solid",
+    fgColor: {
+      rgb: "FFFF0000",
+    },
+    bgColor: null,
+  });
+
+  const stylesXml = entryText(workbook.toEntries(), "xl/styles.xml");
+  assert.match(stylesXml, /<fills count="3">/);
+  assert.match(stylesXml, /<fill><patternFill patternType="solid"><fgColor rgb="FF00FF00"\/><\/patternFill><\/fill>/);
+  assert.match(stylesXml, /<fill><patternFill patternType="solid"><fgColor rgb="FFFF0000"\/><\/patternFill><\/fill>/);
+});
+
+test("cell fill APIs clone and apply fills without mutating shared fill ids", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" s="1" t="inlineStr"><is><t>Hello</t></is></c>
+      <c r="B1" s="1" t="inlineStr"><is><t>World</t></is></c>
+    </row>
+  </sheetData>
+</worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+  const cell = sheet.cell("B1");
+
+  assert.equal(sheet.getFill("A1")?.patternType, "none");
+  assert.equal(cell.fill?.patternType, "none");
+
+  const a1FillId = sheet.setFill("A1", {
+    patternType: "solid",
+    fgColor: {
+      rgb: "FFFF0000",
+    },
+  });
+  const b1FillId = cell.setFill({
+    patternType: "solid",
+    fgColor: {
+      rgb: "FF00FF00",
+    },
+  });
+
+  assert.equal(a1FillId, 2);
+  assert.equal(b1FillId, 3);
+  assert.equal(workbook.getFill(0)?.patternType, "none");
+  assert.equal(workbook.getFill(0)?.fgColor, null);
+  assert.deepEqual(sheet.getFill("A1"), {
+    patternType: "solid",
+    fgColor: {
+      rgb: "FFFF0000",
+    },
+    bgColor: null,
+  });
+  assert.deepEqual(cell.fill, {
+    patternType: "solid",
+    fgColor: {
+      rgb: "FF00FF00",
+    },
+    bgColor: null,
+  });
+
+  const stylesXml = entryText(workbook.toEntries(), "xl/styles.xml");
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.match(stylesXml, /<fills count="4">/);
+  assert.match(sheetXml, /<c r="A1" s="2" t="inlineStr"><is><t>Hello<\/t><\/is><\/c>/);
+  assert.match(sheetXml, /<c r="B1" s="3" t="inlineStr"><is><t>World<\/t><\/is><\/c>/);
+});
+
 test("copyStyle APIs copy style indexes without changing target values", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = replaceEntryText(

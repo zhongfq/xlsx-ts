@@ -132,6 +132,34 @@ export interface CellFontPatch {
   color?: CellFontColorPatch | null;
 }
 
+export interface CellFillColor {
+  rgb?: string;
+  theme?: number;
+  indexed?: number;
+  auto?: boolean;
+  tint?: number;
+}
+
+export interface CellFillColorPatch {
+  rgb?: string | null;
+  theme?: number | null;
+  indexed?: number | null;
+  auto?: boolean | null;
+  tint?: number | null;
+}
+
+export interface CellFillDefinition {
+  patternType: string | null;
+  fgColor: CellFillColor | null;
+  bgColor: CellFillColor | null;
+}
+
+export interface CellFillPatch {
+  patternType?: string | null;
+  fgColor?: CellFillColorPatch | null;
+  bgColor?: CellFillColorPatch | null;
+}
+
 export interface DefinedName {
   hidden: boolean;
   name: string;

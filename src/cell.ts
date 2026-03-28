@@ -1,5 +1,7 @@
 import type { Sheet } from "./sheet.js";
 import type {
+  CellFillDefinition,
+  CellFillPatch,
   CellFontDefinition,
   CellFontPatch,
   CellSnapshot,
@@ -46,6 +48,10 @@ export class Cell {
     return this.sheet.getFont(this.address);
   }
 
+  get fill(): CellFillDefinition | null {
+    return this.sheet.getFill(this.address);
+  }
+
   get type(): CellType {
     return this.getSnapshot().type;
   }
@@ -72,6 +78,10 @@ export class Cell {
 
   setFont(patch: CellFontPatch): number {
     return this.sheet.setFont(this.address, patch);
+  }
+
+  setFill(patch: CellFillPatch): number {
+    return this.sheet.setFill(this.address, patch);
   }
 
   cloneStyle(patch: CellStylePatch = {}): number {

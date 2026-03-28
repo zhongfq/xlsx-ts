@@ -5,7 +5,7 @@ import { unzipSync, zipSync } from "fflate";
 
 import type { ArchiveEntry } from "./types.js";
 
-export class CliZipAdapter {
+export class Zip {
   async readArchive(filePath: string): Promise<ArchiveEntry[]> {
     const archiveData = await readFile(filePath);
     const entriesByPath = unzipSync(new Uint8Array(archiveData));

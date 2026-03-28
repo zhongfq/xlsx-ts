@@ -210,7 +210,20 @@ await workbook.save("output.xlsx");
 - `workbook.renameSheet()` / `sheet.rename()` 当前会同步维护 sheet 名、其它 sheet 的显式公式引用、`definedNames`、内部超链接位置和文档属性
 - `workbook.addSheet()` / `workbook.deleteSheet()` 当前会同步维护 `workbook.xml`、rels、`[Content_Types].xml`，并在删除 sheet 时修正剩余公式与 `definedNames`
 
-## 当前限制
+## 基准测试
+
+仓库内现在包含一份已脱敏的大型基准文件 [res/monster.xlsx](/Users/codetypes/Desktop/Github/xlsx-ts/res/monster.xlsx)，可直接用于性能回归对比。
+
+常用命令：
+
+- `npm run bench:monster`
+  - 对 `res/monster.xlsx` 运行 3 轮对比基准，比较 `xlsx-ts` 和 `xlsx dense`
+- `npm run bench:compare`
+  - 等价于运行仓库里的对比脚本
+- `node --import tsx scripts/benchmark.ts res/monster.xlsx 5`
+  - 自定义文件路径和迭代次数
+
+ ## 当前限制
 
 - zip 读写后端现在使用纯 JS 的 `fflate`，不再依赖系统里的 `python3` 与 `zip`
 - 当前仍会把整个 zip 包与各个 entry 一起放进内存，对超大文件的峰值内存还可以继续优化

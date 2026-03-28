@@ -8,7 +8,7 @@ import {
   shiftFormulaReferences,
 } from "./sheet.js";
 import { parseSharedStrings } from "./shared-strings.js";
-import { CliZipAdapter } from "./zip-cli.js";
+import { Zip } from "./zip.js";
 import type { WorkbookContext } from "./workbook-context.js";
 import { resolveWorkbookContext } from "./workbook-context.js";
 import { basenamePosix, dirnamePosix } from "./utils/path.js";
@@ -29,13 +29,13 @@ const WORKSHEET_RELATIONSHIP_TYPE =
   "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet";
 
 export class Workbook {
-  private readonly adapter: CliZipAdapter;
+  private readonly adapter: Zip;
   private readonly entryOrder: string[];
   private readonly entries: Map<string, Uint8Array>;
   private workbookContext?: WorkbookContext;
   private sharedStringsCache?: string[];
 
-  constructor(entries: Iterable<ArchiveEntry>, adapter = new CliZipAdapter()) {
+  constructor(entries: Iterable<ArchiveEntry>, adapter = new Zip()) {
     this.adapter = adapter;
     this.entries = new Map();
     this.entryOrder = [];
@@ -47,7 +47,7 @@ export class Workbook {
   }
 
   static async open(filePath: string): Promise<Workbook> {
-    const adapter = new CliZipAdapter();
+    const adapter = new Zip();
     const entries = await adapter.readArchive(filePath);
     return new Workbook(entries, adapter);
   }

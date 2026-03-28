@@ -215,6 +215,19 @@ Notes:
 - `workbook.renameSheet()` and `sheet.rename()` currently update sheet names, explicit formula references in other sheets, `definedNames`, internal hyperlink locations, and document properties.
 - `workbook.addSheet()` and `workbook.deleteSheet()` currently maintain `workbook.xml`, workbook rels, and `[Content_Types].xml`, and adjust remaining formulas and `definedNames` when a sheet is deleted.
 
+## Benchmarking
+
+The repo now includes a sanitized large benchmark workbook at [res/monster.xlsx](/Users/codetypes/Desktop/Github/xlsx-ts/res/monster.xlsx), intended for repeatable performance regression checks.
+
+Common commands:
+
+- `npm run bench:monster`
+  - Run a 3-iteration comparison on `res/monster.xlsx` against `xlsx-ts` and `xlsx dense`
+- `npm run bench:compare`
+  - Equivalent wrapper around the compare script kept in the repo
+- `node --import tsx scripts/benchmark.ts res/monster.xlsx 5`
+  - Run the benchmark with a custom file path and iteration count
+
 ## Current Limits
 
 - The zip backend now uses pure JS via `fflate`, so it no longer depends on system `python3` or `zip`.

@@ -1,6 +1,4 @@
 dist
 .tmp
 node_modules
-res/monster.xlsx
-test/compare-test.ts
 *.cpuprofile

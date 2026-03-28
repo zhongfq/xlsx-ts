@@ -1,18 +1,32 @@
 import type { ArchiveEntry } from "./types.js";
 import { XlsxError } from "./errors.js";
-import { Sheet } from "./sheet.js";
+import {
+  Sheet,
+  deleteFormulaReferences,
+  deleteSheetFormulaReferences,
+  shiftFormulaReferences,
+} from "./sheet.js";
 import { CliZipAdapter } from "./zip-cli.js";
 import { basenamePosix, dirnamePosix, resolvePosix } from "./utils/path.js";
 import {
+  escapeXmlText,
   decodeXmlText,
+  escapeRegex,
   extractAllTagTexts,
   getXmlAttr,
+  parseAttributes,
+  serializeAttributes,
 } from "./utils/xml.js";
 
 const XML_DECODER = new TextDecoder();
 const XML_ENCODER = new TextEncoder();
+const WORKSHEET_CONTENT_TYPE =
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml";
+const WORKSHEET_RELATIONSHIP_TYPE =
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet";
 
 interface WorkbookContext {
+  workbookDir: string;
   workbookPath: string;
   workbookRelsPath: string;
   sharedStringsPath?: string;
@@ -65,6 +79,105 @@ export class Workbook {
     return sheet;
   }
 
+  addSheet(sheetName: string): Sheet {
+    assertSheetName(sheetName);
+
+    const context = this.getWorkbookContext();
+    if (context.sheets.some((sheet) => sheet.name === sheetName)) {
+      throw new XlsxError(`Sheet already exists: ${sheetName}`);
+    }
+
+    const workbookXml = this.readEntryText(context.workbookPath);
+    const workbookRelsXml = this.readEntryText(context.workbookRelsPath);
+    const nextSheetId = getNextSheetId(workbookXml);
+    const nextRelationshipId = getNextRelationshipId(workbookRelsXml);
+    const nextSheetPath = getNextWorksheetPath(context.workbookDir, this.entryOrder);
+    const relationshipTarget = toRelationshipTarget(context.workbookDir, nextSheetPath);
+    const contentTypesXml = this.readEntryText("[Content_Types].xml");
+
+    this.writeEntryText(nextSheetPath, buildEmptyWorksheetXml());
+    this.writeEntryText(
+      context.workbookPath,
+      insertBeforeClosingTag(
+        workbookXml,
+        "sheets",
+        `<sheet name="${escapeXmlText(sheetName)}" sheetId="${nextSheetId}" r:id="${nextRelationshipId}"/>`,
+      ),
+    );
+    this.writeEntryText(
+      context.workbookRelsPath,
+      insertBeforeClosingTag(
+        workbookRelsXml,
+        "Relationships",
+        `<Relationship Id="${nextRelationshipId}" Type="${WORKSHEET_RELATIONSHIP_TYPE}" Target="${escapeXmlText(relationshipTarget)}"/>`,
+      ),
+    );
+    this.writeEntryText(
+      "[Content_Types].xml",
+      insertBeforeClosingTag(
+        contentTypesXml,
+        "Types",
+        `<Override PartName="/${escapeXmlText(nextSheetPath)}" ContentType="${WORKSHEET_CONTENT_TYPE}"/>`,
+      ),
+    );
+    this.rewriteAppSheetNames([...context.sheets.map((sheet) => sheet.name), sheetName]);
+
+    return this.getSheet(sheetName);
+  }
+
+  deleteSheet(sheetName: string): void {
+    const context = this.getWorkbookContext();
+    if (context.sheets.length === 1) {
+      throw new XlsxError("Cannot delete the last sheet");
+    }
+
+    const deletedSheetIndex = context.sheets.findIndex((sheet) => sheet.name === sheetName);
+    if (deletedSheetIndex === -1) {
+      throw new XlsxError(`Sheet not found: ${sheetName}`);
+    }
+
+    const deletedSheet = context.sheets[deletedSheetIndex];
+    if (!deletedSheet) {
+      throw new XlsxError(`Sheet not found: ${sheetName}`);
+    }
+
+    const workbookXml = this.readEntryText(context.workbookPath);
+    const workbookRelsXml = this.readEntryText(context.workbookRelsPath);
+    const contentTypesXml = this.readEntryText("[Content_Types].xml");
+
+    for (const sheet of context.sheets) {
+      if (sheet.path === deletedSheet.path) {
+        continue;
+      }
+
+      this.rewriteSheetFormulaTexts(sheet.path, (formula) =>
+        deleteSheetFormulaReferences(formula, sheetName),
+      );
+    }
+
+    this.writeEntryText(
+      context.workbookPath,
+      removeSheetFromWorkbookXml(workbookXml, deletedSheet.relationshipId, sheetName, deletedSheetIndex),
+    );
+    this.writeEntryText(
+      context.workbookRelsPath,
+      removeRelationshipById(workbookRelsXml, deletedSheet.relationshipId),
+    );
+    this.writeEntryText(
+      "[Content_Types].xml",
+      removeContentTypeOverride(contentTypesXml, deletedSheet.path),
+    );
+    this.rewriteAppSheetNames(
+      context.sheets.filter((sheet) => sheet.name !== sheetName).map((sheet) => sheet.name),
+    );
+    this.deleteEntry(deletedSheet.path);
+
+    const sheetRelsPath = `${dirnamePosix(deletedSheet.path)}/_rels/${basenamePosix(deletedSheet.path)}.rels`;
+    if (this.entries.has(sheetRelsPath)) {
+      this.deleteEntry(sheetRelsPath);
+    }
+  }
+
   async save(filePath: string): Promise<void> {
     await this.adapter.writeArchive(filePath, this.toEntries());
   }
@@ -97,6 +210,7 @@ export class Workbook {
     const sharedStringsPath = findRelationshipTarget(workbookRelsXml, /\/sharedStrings$/, workbookDir);
 
     this.workbookContext = {
+      workbookDir,
       workbookPath,
       workbookRelsPath,
       sharedStringsPath,
@@ -123,6 +237,101 @@ export class Workbook {
     return [...this.sharedStringsCache];
   }
 
+  rewriteDefinedNamesForSheetStructure(
+    sheetName: string,
+    targetColumnNumber: number,
+    columnCount: number,
+    targetRowNumber: number,
+    rowCount: number,
+    mode: "shift" | "delete",
+  ): void {
+    const context = this.getWorkbookContext();
+    const localSheetIndex = context.sheets.findIndex((sheet) => sheet.name === sheetName);
+    if (localSheetIndex === -1) {
+      return;
+    }
+
+    const workbookXml = this.readEntryText(context.workbookPath);
+    let changed = false;
+    const nextWorkbookXml = workbookXml.replace(
+      /<definedName\b([^>]*)>([\s\S]*?)<\/definedName>/g,
+      (match, attributesSource, nameSource) => {
+        const localSheetIdText = getXmlAttr(attributesSource, "localSheetId");
+        const includeUnqualifiedReferences =
+          localSheetIdText !== undefined && Number(localSheetIdText) === localSheetIndex;
+        const nameText = decodeXmlText(nameSource);
+        const nextNameText =
+          mode === "shift"
+            ? shiftFormulaReferences(
+                nameText,
+                sheetName,
+                targetColumnNumber,
+                columnCount,
+                targetRowNumber,
+                rowCount,
+                includeUnqualifiedReferences,
+              )
+            : deleteFormulaReferences(
+                nameText,
+                sheetName,
+                targetColumnNumber,
+                columnCount,
+                targetRowNumber,
+                rowCount,
+                includeUnqualifiedReferences,
+              );
+
+        if (nextNameText === nameText) {
+          return match;
+        }
+
+        changed = true;
+        return `<definedName${attributesSource}>${escapeXmlText(nextNameText)}</definedName>`;
+      },
+    );
+
+    if (changed) {
+      this.writeEntryText(context.workbookPath, nextWorkbookXml);
+    }
+  }
+
+  private rewriteSheetFormulaTexts(
+    path: string,
+    transformFormula: (formula: string) => string,
+  ): void {
+    const sheetXml = this.readEntryText(path);
+    let changed = false;
+    const nextSheetXml = sheetXml.replace(/<f\b([^>]*)>([\s\S]*?)<\/f>/g, (match, attributesSource, formulaSource) => {
+      const formula = decodeXmlText(formulaSource);
+      const nextFormula = transformFormula(formula);
+
+      if (nextFormula === formula) {
+        return match;
+      }
+
+      changed = true;
+      return `<f${attributesSource}>${escapeXmlText(nextFormula)}</f>`;
+    });
+
+    if (changed) {
+      this.writeEntryText(path, nextSheetXml);
+    }
+  }
+
+  private rewriteAppSheetNames(sheetNames: string[]): void {
+    const appPath = "docProps/app.xml";
+    if (!this.entries.has(appPath)) {
+      return;
+    }
+
+    const appXml = this.readEntryText(appPath);
+    const nextAppXml = updateAppSheetNames(appXml, sheetNames);
+
+    if (nextAppXml !== appXml) {
+      this.writeEntryText(appPath, nextAppXml);
+    }
+  }
+
   readEntryText(path: string): string {
     const entry = this.entries.get(path);
     if (!entry) {
@@ -141,8 +350,182 @@ export class Workbook {
       this.sharedStringsCache = undefined;
     }
 
+    if (
+      this.workbookContext &&
+      (this.workbookContext.workbookPath === path || this.workbookContext.workbookRelsPath === path)
+    ) {
+      this.workbookContext = undefined;
+    }
+
     this.entries.set(path, XML_ENCODER.encode(text));
   }
+
+  private deleteEntry(path: string): void {
+    if (!this.entries.delete(path)) {
+      return;
+    }
+
+    const entryIndex = this.entryOrder.indexOf(path);
+    if (entryIndex !== -1) {
+      this.entryOrder.splice(entryIndex, 1);
+    }
+
+    if (
+      this.workbookContext &&
+      (this.workbookContext.sharedStringsPath === path ||
+        this.workbookContext.workbookPath === path ||
+        this.workbookContext.workbookRelsPath === path)
+    ) {
+      this.sharedStringsCache = undefined;
+      this.workbookContext = undefined;
+    }
+  }
+}
+
+function assertSheetName(sheetName: string): void {
+  if (sheetName.length === 0 || sheetName.length > 31 || /[\\/*?:[\]]/.test(sheetName)) {
+    throw new XlsxError(`Invalid sheet name: ${sheetName}`);
+  }
+}
+
+function buildEmptyWorksheetXml(): string {
+  return (
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+    `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData></sheetData></worksheet>`
+  );
+}
+
+function getNextSheetId(workbookXml: string): number {
+  let nextSheetId = 1;
+
+  for (const match of workbookXml.matchAll(/<sheet\b[^>]*\bsheetId="(\d+)"/g)) {
+    nextSheetId = Math.max(nextSheetId, Number(match[1]) + 1);
+  }
+
+  return nextSheetId;
+}
+
+function getNextRelationshipId(relationshipsXml: string): string {
+  let nextId = 1;
+
+  for (const match of relationshipsXml.matchAll(/\bId="rId(\d+)"/g)) {
+    nextId = Math.max(nextId, Number(match[1]) + 1);
+  }
+
+  return `rId${nextId}`;
+}
+
+function getNextWorksheetPath(workbookDir: string, entryOrder: string[]): string {
+  let nextIndex = 1;
+  const prefix = workbookDir ? `${workbookDir}/worksheets/` : "worksheets/";
+
+  for (const path of entryOrder) {
+    const match = path.match(new RegExp(`^${escapeRegex(prefix)}sheet(\\d+)\\.xml$`));
+    if (match) {
+      nextIndex = Math.max(nextIndex, Number(match[1]) + 1);
+    }
+  }
+
+  return `${prefix}sheet${nextIndex}.xml`;
+}
+
+function toRelationshipTarget(workbookDir: string, path: string): string {
+  return workbookDir && path.startsWith(`${workbookDir}/`) ? path.slice(workbookDir.length + 1) : path;
+}
+
+function insertBeforeClosingTag(xml: string, tagName: string, snippet: string): string {
+  const closingTag = `</${tagName}>`;
+  const insertionIndex = xml.indexOf(closingTag);
+  if (insertionIndex === -1) {
+    throw new XlsxError(`Missing closing tag: ${closingTag}`);
+  }
+
+  return xml.slice(0, insertionIndex) + snippet + xml.slice(insertionIndex);
+}
+
+function removeSheetFromWorkbookXml(
+  workbookXml: string,
+  relationshipId: string,
+  deletedSheetName: string,
+  deletedSheetIndex: number,
+): string {
+  const withoutSheet = workbookXml.replace(
+    new RegExp(`<sheet\\b[^>]*\\br:id="${escapeRegex(relationshipId)}"[^>]*/>`),
+    "",
+  );
+
+  return withoutSheet.replace(
+    /<definedName\b([^>]*)>([\s\S]*?)<\/definedName>/g,
+    (match, attributesSource, nameSource) => {
+      const attributes = parseAttributes(attributesSource);
+      const localSheetIdIndex = attributes.findIndex(([name]) => name === "localSheetId");
+      const localSheetIdText = localSheetIdIndex === -1 ? undefined : attributes[localSheetIdIndex]?.[1];
+
+      if (localSheetIdText !== undefined) {
+        const localSheetId = Number(localSheetIdText);
+        if (localSheetId === deletedSheetIndex) {
+          return "";
+        }
+
+        if (localSheetId > deletedSheetIndex) {
+          attributes[localSheetIdIndex] = ["localSheetId", String(localSheetId - 1)];
+        }
+      }
+
+      const nameText = decodeXmlText(nameSource);
+      const nextNameText = deleteSheetFormulaReferences(nameText, deletedSheetName);
+      const serializedAttributes = serializeAttributes(attributes);
+      return `<definedName${serializedAttributes ? ` ${serializedAttributes}` : ""}>${escapeXmlText(nextNameText)}</definedName>`;
+    },
+  );
+}
+
+function removeRelationshipById(relationshipsXml: string, relationshipId: string): string {
+  return relationshipsXml.replace(
+    new RegExp(`<Relationship\\b[^>]*\\bId="${escapeRegex(relationshipId)}"[^>]*/>`),
+    "",
+  );
+}
+
+function removeContentTypeOverride(contentTypesXml: string, partPath: string): string {
+  return contentTypesXml.replace(
+    new RegExp(`<Override\\b[^>]*\\bPartName="/${escapeRegex(partPath)}"[^>]*/>`),
+    "",
+  );
+}
+
+function updateAppSheetNames(appXml: string, sheetNames: string[]): string {
+  const headingPairsMatch = appXml.match(
+    /<HeadingPairs>([\s\S]*?)<\/HeadingPairs>/,
+  );
+  const titlesOfPartsMatch = appXml.match(
+    /<TitlesOfParts>([\s\S]*?)<\/TitlesOfParts>/,
+  );
+
+  if (!headingPairsMatch && !titlesOfPartsMatch) {
+    return appXml;
+  }
+
+  let nextAppXml = appXml;
+
+  if (headingPairsMatch) {
+    const nextHeadingPairs =
+      `<HeadingPairs><vt:vector size="2" baseType="variant">` +
+      `<vt:variant><vt:lpstr>Worksheets</vt:lpstr></vt:variant>` +
+      `<vt:variant><vt:i4>${sheetNames.length}</vt:i4></vt:variant>` +
+      `</vt:vector></HeadingPairs>`;
+    nextAppXml = nextAppXml.replace(/<HeadingPairs>[\s\S]*?<\/HeadingPairs>/, nextHeadingPairs);
+  }
+
+  if (titlesOfPartsMatch) {
+    const nextTitlesOfParts =
+      `<TitlesOfParts><vt:vector size="${sheetNames.length}" baseType="lpstr">` +
+      sheetNames.map((sheetName) => `<vt:lpstr>${escapeXmlText(sheetName)}</vt:lpstr>`).join("") +
+      `</vt:vector></TitlesOfParts>`;
+    nextAppXml = nextAppXml.replace(/<TitlesOfParts>[\s\S]*?<\/TitlesOfParts>/, nextTitlesOfParts);
+  }
+
+  return nextAppXml;
 }
 
 function parseRelationships(xml: string, baseDir: string): Map<string, string> {

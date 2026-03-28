@@ -267,10 +267,12 @@ export class Sheet {
     }
 
     nextSheetXml = updateMergedRanges(nextSheetXml, nextMergedRanges);
+    nextSheetXml = transformWorksheetStructureReferences(nextSheetXml, 0, 0, rowNumber, count, "shift");
     this.writeSheetXml(nextSheetXml);
     this.syncReferencedFormulasInOtherSheets((formula) =>
       shiftFormulaReferences(formula, this.name, 0, 0, rowNumber, count, false),
     );
+    this.workbook.rewriteDefinedNamesForSheetStructure(this.name, 0, 0, rowNumber, count, "shift");
   }
 
   insertColumn(column: number | string, count = 1): void {
@@ -302,10 +304,19 @@ export class Sheet {
     }
 
     nextSheetXml = updateMergedRanges(nextSheetXml, nextMergedRanges);
+    nextSheetXml = transformWorksheetStructureReferences(
+      nextSheetXml,
+      columnNumber,
+      count,
+      0,
+      0,
+      "shift",
+    );
     this.writeSheetXml(nextSheetXml);
     this.syncReferencedFormulasInOtherSheets((formula) =>
       shiftFormulaReferences(formula, this.name, columnNumber, count, 0, 0, false),
     );
+    this.workbook.rewriteDefinedNamesForSheetStructure(this.name, columnNumber, count, 0, 0, "shift");
   }
 
   deleteRow(rowNumber: number, count = 1): void {
@@ -335,10 +346,12 @@ export class Sheet {
     }
 
     nextSheetXml = updateMergedRanges(nextSheetXml, nextMergedRanges);
+    nextSheetXml = transformWorksheetStructureReferences(nextSheetXml, 0, 0, rowNumber, count, "delete");
     this.writeSheetXml(nextSheetXml);
     this.syncReferencedFormulasInOtherSheets((formula) =>
       deleteFormulaReferences(formula, this.name, 0, 0, rowNumber, count, false),
     );
+    this.workbook.rewriteDefinedNamesForSheetStructure(this.name, 0, 0, rowNumber, count, "delete");
   }
 
   deleteColumn(column: number | string, count = 1): void {
@@ -362,10 +375,19 @@ export class Sheet {
     }
 
     nextSheetXml = updateMergedRanges(nextSheetXml, nextMergedRanges);
+    nextSheetXml = transformWorksheetStructureReferences(
+      nextSheetXml,
+      columnNumber,
+      count,
+      0,
+      0,
+      "delete",
+    );
     this.writeSheetXml(nextSheetXml);
     this.syncReferencedFormulasInOtherSheets((formula) =>
       deleteFormulaReferences(formula, this.name, columnNumber, count, 0, 0, false),
     );
+    this.workbook.rewriteDefinedNamesForSheetStructure(this.name, columnNumber, count, 0, 0, "delete");
   }
 
   setCell(address: string, value: CellValue): void {
@@ -1251,7 +1273,7 @@ function buildSheetIndex(sheetXml: string): SheetIndex {
 }
 
 function splitCellAddress(address: string): { rowNumber: number; columnNumber: number } {
-  const match = address.match(/^([A-Z]+)(\d+)$/i);
+  const match = address.match(/^\$?([A-Z]+)\$?(\d+)$/i);
   if (!match) {
     throw new XlsxError(`Invalid cell address: ${address}`);
   }
@@ -1501,6 +1523,243 @@ function deleteRangeAxis(
   return { start: nextStart, end: nextEnd };
 }
 
+function transformWorksheetStructureReferences(
+  sheetXml: string,
+  targetColumnNumber: number,
+  columnCount: number,
+  targetRowNumber: number,
+  rowCount: number,
+  mode: "shift" | "delete",
+): string {
+  const transformRange = (range: string) =>
+    mode === "shift"
+      ? shiftRangeRef(range, targetColumnNumber, columnCount, targetRowNumber, rowCount)
+      : deleteRangeRef(range, targetColumnNumber, columnCount, targetRowNumber, rowCount);
+
+  let nextSheetXml = sheetXml;
+
+  for (const tagName of WORKSHEET_REF_TAGS) {
+    nextSheetXml = rewriteWorksheetReferenceTag(nextSheetXml, tagName, "ref", false, transformRange);
+  }
+
+  for (const tagName of WORKSHEET_SQREF_TAGS) {
+    nextSheetXml = rewriteWorksheetReferenceTag(nextSheetXml, tagName, "sqref", true, transformRange);
+  }
+
+  for (const [tagName, attributeName] of WORKSHEET_CELL_REF_ATTRIBUTES) {
+    nextSheetXml = rewriteWorksheetCellReferenceAttribute(
+      nextSheetXml,
+      tagName,
+      attributeName,
+      mode,
+      targetColumnNumber,
+      columnCount,
+      targetRowNumber,
+      rowCount,
+    );
+  }
+
+  nextSheetXml = rewriteCountedContainer(nextSheetXml, "dataValidations", "dataValidation", "count");
+  nextSheetXml = rewriteEmptyContainer(nextSheetXml, "hyperlinks", "hyperlink");
+  return nextSheetXml;
+}
+
+function rewriteWorksheetReferenceTag(
+  sheetXml: string,
+  tagName: string,
+  attributeName: string,
+  multipleRanges: boolean,
+  transformRange: (range: string) => string | null,
+): string {
+  const regex = new RegExp(
+    `<${escapeRegex(tagName)}\\b([^>]*?)(\\/?>|>[\\s\\S]*?<\\/${escapeRegex(tagName)}>)`,
+    "g",
+  );
+
+  return sheetXml.replace(regex, (match, attributesSource, bodySource) => {
+    const attributes = parseAttributes(attributesSource);
+    const attributeIndex = attributes.findIndex(([name]) => name === attributeName);
+
+    if (attributeIndex === -1) {
+      return match;
+    }
+
+    const currentValue = attributes[attributeIndex]?.[1] ?? "";
+    const nextValue = transformWorksheetReferenceValue(currentValue, multipleRanges, transformRange);
+
+    if (nextValue === currentValue) {
+      return match;
+    }
+
+    if (nextValue === null) {
+      return "";
+    }
+
+    const nextAttributes = [...attributes];
+    nextAttributes[attributeIndex] = [attributeName, nextValue];
+    const serializedAttributes = serializeAttributes(nextAttributes);
+    const tagOpen = serializedAttributes.length > 0 ? `<${tagName} ${serializedAttributes}` : `<${tagName}`;
+
+    if (bodySource === "/>") {
+      return `${tagOpen}/>`;
+    }
+
+    const closingTag = `</${tagName}>`;
+    const innerXml = bodySource.slice(1, -closingTag.length);
+    return `${tagOpen}>${innerXml}${closingTag}`;
+  });
+}
+
+function transformWorksheetReferenceValue(
+  value: string,
+  multipleRanges: boolean,
+  transformRange: (range: string) => string | null,
+): string | null {
+  if (multipleRanges) {
+    const nextRanges = value
+      .trim()
+      .split(/\s+/)
+      .filter((range) => range.length > 0)
+      .map((range) => transformRange(range))
+      .filter((range): range is string => range !== null);
+
+    return nextRanges.length > 0 ? nextRanges.join(" ") : null;
+  }
+
+  return transformRange(value);
+}
+
+function rewriteCountedContainer(
+  sheetXml: string,
+  containerTagName: string,
+  childTagName: string,
+  countAttributeName: string,
+): string {
+  const regex = new RegExp(
+    `<${escapeRegex(containerTagName)}\\b([^>]*)>([\\s\\S]*?)<\\/${escapeRegex(containerTagName)}>`,
+    "g",
+  );
+
+  return sheetXml.replace(regex, (_match, attributesSource, innerXml) => {
+    const childMatches = innerXml.match(new RegExp(`<${escapeRegex(childTagName)}\\b`, "g")) ?? [];
+    if (childMatches.length === 0) {
+      return "";
+    }
+
+    const attributes = parseAttributes(attributesSource);
+    const countIndex = attributes.findIndex(([name]) => name === countAttributeName);
+    const nextAttributes = [...attributes];
+
+    if (countIndex === -1) {
+      nextAttributes.push([countAttributeName, String(childMatches.length)]);
+    } else {
+      nextAttributes[countIndex] = [countAttributeName, String(childMatches.length)];
+    }
+
+    const serializedAttributes = serializeAttributes(nextAttributes);
+    return `<${containerTagName}${serializedAttributes ? ` ${serializedAttributes}` : ""}>${innerXml}</${containerTagName}>`;
+  });
+}
+
+function rewriteEmptyContainer(
+  sheetXml: string,
+  containerTagName: string,
+  childTagName: string,
+): string {
+  const regex = new RegExp(
+    `<${escapeRegex(containerTagName)}\\b([^>]*)>([\\s\\S]*?)<\\/${escapeRegex(containerTagName)}>`,
+    "g",
+  );
+
+  return sheetXml.replace(regex, (match, _attributesSource, innerXml) => {
+    return new RegExp(`<${escapeRegex(childTagName)}\\b`).test(innerXml) ? match : "";
+  });
+}
+
+function rewriteWorksheetCellReferenceAttribute(
+  sheetXml: string,
+  tagName: string,
+  attributeName: string,
+  mode: "shift" | "delete",
+  targetColumnNumber: number,
+  columnCount: number,
+  targetRowNumber: number,
+  rowCount: number,
+): string {
+  const regex = new RegExp(
+    `<${escapeRegex(tagName)}\\b([^>]*?)(\\/?>|>[\\s\\S]*?<\\/${escapeRegex(tagName)}>)`,
+    "g",
+  );
+
+  return sheetXml.replace(regex, (match, attributesSource, bodySource) => {
+    const attributes = parseAttributes(attributesSource);
+    const attributeIndex = attributes.findIndex(([name]) => name === attributeName);
+
+    if (attributeIndex === -1) {
+      return match;
+    }
+
+    const currentValue = attributes[attributeIndex]?.[1] ?? "";
+    const nextValue =
+      mode === "shift"
+        ? shiftCellAddress(
+            currentValue,
+            targetColumnNumber,
+            columnCount,
+            targetRowNumber,
+            rowCount,
+          )
+        : deleteCellReferenceAddress(
+            currentValue,
+            targetColumnNumber,
+            columnCount,
+            targetRowNumber,
+            rowCount,
+          );
+
+    if (nextValue === currentValue) {
+      return match;
+    }
+
+    const nextAttributes = [...attributes];
+    if (nextValue === null) {
+      nextAttributes.splice(attributeIndex, 1);
+    } else {
+      nextAttributes[attributeIndex] = [attributeName, nextValue];
+    }
+
+    const serializedAttributes = serializeAttributes(nextAttributes);
+    const tagOpen = serializedAttributes.length > 0 ? `<${tagName} ${serializedAttributes}` : `<${tagName}`;
+
+    if (bodySource === "/>") {
+      return `${tagOpen}/>`;
+    }
+
+    const closingTag = `</${tagName}>`;
+    const innerXml = bodySource.slice(1, -closingTag.length);
+    return `${tagOpen}>${innerXml}${closingTag}`;
+  });
+}
+
+function deleteCellReferenceAddress(
+  address: string,
+  targetColumnNumber: number,
+  columnCount: number,
+  targetRowNumber: number,
+  rowCount: number,
+): string | null {
+  const { rowNumber, columnNumber } = splitCellAddress(address);
+
+  if (isColumnDeleted(columnNumber, targetColumnNumber, columnCount) || isRowDeleted(rowNumber, targetRowNumber, rowCount)) {
+    return null;
+  }
+
+  return makeCellAddress(
+    deleteShiftRowNumber(rowNumber, targetRowNumber, rowCount),
+    deleteShiftColumnNumber(columnNumber, targetColumnNumber, columnCount),
+  );
+}
+
 function shiftRowSpans(spans: string, targetColumnNumber: number, count: number): string {
   const match = spans.match(/^(\d+):(\d+)$/);
   if (!match) {
@@ -1512,7 +1771,7 @@ function shiftRowSpans(spans: string, targetColumnNumber: number, count: number)
   return `${startColumn >= targetColumnNumber ? startColumn + count : startColumn}:${endColumn >= targetColumnNumber ? endColumn + count : endColumn}`;
 }
 
-function shiftFormulaReferences(
+export function shiftFormulaReferences(
   formula: string,
   currentSheetName: string,
   targetColumnNumber: number,
@@ -1623,7 +1882,7 @@ function shiftFormulaReferences(
   return nextFormula;
 }
 
-function deleteFormulaReferences(
+export function deleteFormulaReferences(
   formula: string,
   currentSheetName: string,
   targetColumnNumber: number,
@@ -1752,6 +2011,71 @@ function deleteFormulaReferences(
       nextFormula += `${sheetRef ?? ""}${columnDollar}${numberToColumnLabel(deleteShiftColumnNumber(columnNumber, targetColumnNumber, columnCount))}${rowDollar}${deleteShiftRowNumber(rowNumber, targetRowNumber, rowCount)}`;
     }
 
+    cursor += fullMatch.length;
+  }
+
+  return nextFormula;
+}
+
+export function deleteSheetFormulaReferences(formula: string, deletedSheetName: string): string {
+  let nextFormula = "";
+  let cursor = 0;
+  let inString = false;
+
+  while (cursor < formula.length) {
+    const character = formula[cursor];
+
+    if (character === "\"") {
+      nextFormula += character;
+
+      if (inString && formula[cursor + 1] === "\"") {
+        nextFormula += "\"";
+        cursor += 2;
+        continue;
+      }
+
+      inString = !inString;
+      cursor += 1;
+      continue;
+    }
+
+    if (inString) {
+      nextFormula += character;
+      cursor += 1;
+      continue;
+    }
+
+    const remaining = formula.slice(cursor);
+    const rangeMatch = remaining.match(
+      /^((?:'[^']+'|[A-Za-z_][A-Za-z0-9_.]*)!)?(\$?)([A-Z]+)(\$?)(\d+):((?:'[^']+'|[A-Za-z_][A-Za-z0-9_.]*)!)?(\$?)([A-Z]+)(\$?)(\d+)/,
+    );
+
+    if (rangeMatch) {
+      const [fullMatch, startSheetRef, , , , , endSheetRef] = rangeMatch;
+
+      if (
+        matchesSheetReference(startSheetRef, deletedSheetName) ||
+        matchesSheetReference(endSheetRef, deletedSheetName)
+      ) {
+        nextFormula += "#REF!";
+      } else {
+        nextFormula += fullMatch;
+      }
+
+      cursor += fullMatch.length;
+      continue;
+    }
+
+    const refMatch = remaining.match(/^((?:'[^']+'|[A-Za-z_][A-Za-z0-9_.]*)!)?(\$?)([A-Z]+)(\$?)(\d+)/);
+    if (!refMatch) {
+      nextFormula += character;
+      cursor += 1;
+      continue;
+    }
+
+    const [fullMatch, sheetRef] = refMatch;
+
+    nextFormula += matchesSheetReference(sheetRef, deletedSheetName) ? "#REF!" : fullMatch;
     cursor += fullMatch.length;
   }
 
@@ -1919,3 +2243,16 @@ function assertInsertCount(count: number): void {
     throw new XlsxError(`Invalid insert count: ${count}`);
   }
 }
+
+const WORKSHEET_REF_TAGS = ["autoFilter", "sortState", "hyperlink"];
+const WORKSHEET_SQREF_TAGS = [
+  "conditionalFormatting",
+  "dataValidation",
+  "selection",
+  "protectedRange",
+  "ignoredError",
+];
+const WORKSHEET_CELL_REF_ATTRIBUTES: Array<[string, string]> = [
+  ["selection", "activeCell"],
+  ["pane", "topLeftCell"],
+];

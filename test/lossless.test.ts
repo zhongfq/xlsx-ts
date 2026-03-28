@@ -245,6 +245,64 @@ test("insertRow shifts cell addresses, formulas, and merged ranges together", as
   assert.match(sheetXml, /<dimension ref="A1:B4"\/>/);
 });
 
+test("insertColumn updates worksheet ref attributes and defined names", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    replaceEntryText(
+      await loadFixtureEntries(fixtureDir),
+      "xl/workbook.xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+  <definedNames>
+    <definedName name="_xlnm.Print_Area" localSheetId="0">$A$1:$C$4</definedName>
+    <definedName name="DataRange">Sheet1!$B$2:$C$4</definedName>
+  </definedNames>
+</workbook>`,
+    ),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetViews><sheetView workbookViewId="0"><selection activeCell="B2" sqref="B2:C2"/></sheetView></sheetViews>
+  <sheetData>
+    <row r="1">
+      <c r="A1"><v>1</v></c>
+      <c r="B1"><v>2</v></c>
+      <c r="C1"><v>3</v></c>
+    </row>
+    <row r="2">
+      <c r="A2"><v>4</v></c>
+      <c r="B2"><v>5</v></c>
+      <c r="C2"><v>6</v></c>
+    </row>
+  </sheetData>
+  <autoFilter ref="A1:C4"/>
+  <sortState ref="A2:C4"/>
+  <conditionalFormatting sqref="B2:C4"><cfRule type="expression" priority="1"><formula>B2&gt;0</formula></cfRule></conditionalFormatting>
+  <dataValidations count="1"><dataValidation type="whole" sqref="A2:B4"/></dataValidations>
+  <hyperlinks><hyperlink ref="C2" location="#Sheet1!A1"/></hyperlinks>
+</worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.insertColumn("B");
+
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  const workbookXml = entryText(workbook.toEntries(), "xl/workbook.xml");
+
+  assert.match(sheetXml, /<selection activeCell="C2" sqref="C2:D2"\/>/);
+  assert.match(sheetXml, /<autoFilter ref="A1:D4"\/>/);
+  assert.match(sheetXml, /<sortState ref="A2:D4"\/>/);
+  assert.match(sheetXml, /<conditionalFormatting sqref="C2:D4">/);
+  assert.match(sheetXml, /<dataValidations count="1"><dataValidation type="whole" sqref="A2:C4"\/><\/dataValidations>/);
+  assert.match(sheetXml, /<hyperlinks><hyperlink ref="D2" location="#Sheet1!A1"\/><\/hyperlinks>/);
+  assert.match(workbookXml, /<definedName name="_xlnm.Print_Area" localSheetId="0">\$A\$1:\$D\$4<\/definedName>/);
+  assert.match(workbookXml, /<definedName name="DataRange">Sheet1!\$C\$2:\$D\$4<\/definedName>/);
+});
+
 test("insertColumn updates formulas in other sheets that reference the edited sheet", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = withSecondSheet(
@@ -427,6 +485,74 @@ test("deleteRow shifts cells, shrinks ranges, and emits #REF! for deleted refs",
   assert.doesNotMatch(sheetXml, /<row r="4">/);
   assert.match(sheetXml, /<row r="2">[\s\S]*<c r="A2"><f>#REF!<\/f><v>2<\/v><\/c>[\s\S]*<c r="B2"><v>3<\/v><\/c>[\s\S]*<\/row>/);
   assert.match(sheetXml, /<mergeCell ref="A2:B3"\/>/);
+});
+
+test("deleteRow updates worksheet ref attributes and defined names", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    replaceEntryText(
+      await loadFixtureEntries(fixtureDir),
+      "xl/workbook.xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+  <definedNames>
+    <definedName name="_xlnm.Print_Area" localSheetId="0">$A$1:$C$4</definedName>
+    <definedName name="DataRange">Sheet1!$B$2:$C$4</definedName>
+  </definedNames>
+</workbook>`,
+    ),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetViews><sheetView workbookViewId="0"><selection activeCell="B3" sqref="B3:C3"/></sheetView></sheetViews>
+  <sheetData>
+    <row r="1">
+      <c r="A1"><v>1</v></c>
+      <c r="B1"><v>2</v></c>
+      <c r="C1"><v>3</v></c>
+    </row>
+    <row r="2">
+      <c r="A2"><v>4</v></c>
+      <c r="B2"><v>5</v></c>
+      <c r="C2"><v>6</v></c>
+    </row>
+    <row r="3">
+      <c r="A3"><v>7</v></c>
+      <c r="B3"><v>8</v></c>
+      <c r="C3"><v>9</v></c>
+    </row>
+    <row r="4">
+      <c r="A4"><v>10</v></c>
+      <c r="B4"><v>11</v></c>
+      <c r="C4"><v>12</v></c>
+    </row>
+  </sheetData>
+  <autoFilter ref="A1:C4"/>
+  <sortState ref="A2:C4"/>
+  <conditionalFormatting sqref="B2:C4"><cfRule type="expression" priority="1"><formula>B2&gt;0</formula></cfRule></conditionalFormatting>
+  <dataValidations count="1"><dataValidation type="whole" sqref="A2:B4"/></dataValidations>
+  <hyperlinks><hyperlink ref="C3" location="#Sheet1!A1"/></hyperlinks>
+</worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.deleteRow(2);
+
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  const workbookXml = entryText(workbook.toEntries(), "xl/workbook.xml");
+
+  assert.match(sheetXml, /<selection activeCell="B2" sqref="B2:C2"\/>/);
+  assert.match(sheetXml, /<autoFilter ref="A1:C3"\/>/);
+  assert.match(sheetXml, /<sortState ref="A2:C3"\/>/);
+  assert.match(sheetXml, /<conditionalFormatting sqref="B2:C3">/);
+  assert.match(sheetXml, /<dataValidations count="1"><dataValidation type="whole" sqref="A2:B3"\/><\/dataValidations>/);
+  assert.match(sheetXml, /<hyperlinks><hyperlink ref="C2" location="#Sheet1!A1"\/><\/hyperlinks>/);
+  assert.match(workbookXml, /<definedName name="_xlnm.Print_Area" localSheetId="0">\$A\$1:\$C\$3<\/definedName>/);
+  assert.match(workbookXml, /<definedName name="DataRange">Sheet1!\$B\$2:\$C\$3<\/definedName>/);
 });
 
 test("row APIs read sparse rows and write from a column offset", async () => {
@@ -698,6 +824,110 @@ test("writing cells keeps worksheet dimension ref in sync", async () => {
 
   const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
   assert.match(sheetXml, /<dimension ref="A1:C4"\/>/);
+});
+
+test("workbook can add a sheet and wire workbook metadata", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "docProps/app.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
+  <Application>xlsx-ts</Application>
+  <HeadingPairs><vt:vector size="2" baseType="variant"><vt:variant><vt:lpstr>Worksheets</vt:lpstr></vt:variant><vt:variant><vt:i4>1</vt:i4></vt:variant></vt:vector></HeadingPairs>
+  <TitlesOfParts><vt:vector size="1" baseType="lpstr"><vt:lpstr>Sheet1</vt:lpstr></vt:vector></TitlesOfParts>
+</Properties>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+
+  const newSheet = workbook.addSheet("Sheet2");
+  newSheet.setCell("A1", "New");
+
+  assert.deepEqual(workbook.getSheets().map((sheet) => sheet.name), ["Sheet1", "Sheet2"]);
+  assert.equal(newSheet.getCell("A1"), "New");
+
+  const workbookXml = entryText(workbook.toEntries(), "xl/workbook.xml");
+  const relsXml = entryText(workbook.toEntries(), "xl/_rels/workbook.xml.rels");
+  const contentTypesXml = entryText(workbook.toEntries(), "[Content_Types].xml");
+  const sheet2Xml = entryText(workbook.toEntries(), "xl/worksheets/sheet2.xml");
+  const appXml = entryText(workbook.toEntries(), "docProps/app.xml");
+
+  assert.match(workbookXml, /<sheet name="Sheet2" sheetId="2" r:id="rId3"\/>/);
+  assert.match(relsXml, /<Relationship Id="rId3" Type="http:\/\/schemas\.openxmlformats\.org\/officeDocument\/2006\/relationships\/worksheet" Target="worksheets\/sheet2\.xml"\/>/);
+  assert.match(contentTypesXml, /<Override PartName="\/xl\/worksheets\/sheet2\.xml" ContentType="application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.worksheet\+xml"\/>/);
+  assert.match(sheet2Xml, /<row r="1"><c r="A1" t="inlineStr"><is><t>New<\/t><\/is><\/c><\/row>/);
+  assert.match(appXml, /<vt:i4>2<\/vt:i4>/);
+  assert.match(appXml, /<vt:lpstr>Sheet1<\/vt:lpstr><vt:lpstr>Sheet2<\/vt:lpstr>/);
+});
+
+test("workbook can delete a sheet and rewrite remaining references", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    replaceEntryText(
+      replaceEntryText(
+        withSecondSheet(
+          await loadFixtureEntries(fixtureDir),
+          `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1"><v>9</v></c>
+    </row>
+  </sheetData>
+</worksheet>`,
+        ),
+        "xl/workbook.xml",
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+    <sheet name="Sheet2" sheetId="2" r:id="rId3"/>
+  </sheets>
+  <definedNames>
+    <definedName name="ExternalRef">Sheet2!$A$1</definedName>
+    <definedName name="LocalToSheet2" localSheetId="1">$A$1</definedName>
+  </definedNames>
+</workbook>`,
+      ),
+      "xl/worksheets/sheet1.xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1"><f>Sheet2!A1</f><v>9</v></c>
+    </row>
+  </sheetData>
+</worksheet>`,
+    ),
+    "docProps/app.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
+  <Application>xlsx-ts</Application>
+  <HeadingPairs><vt:vector size="2" baseType="variant"><vt:variant><vt:lpstr>Worksheets</vt:lpstr></vt:variant><vt:variant><vt:i4>2</vt:i4></vt:variant></vt:vector></HeadingPairs>
+  <TitlesOfParts><vt:vector size="2" baseType="lpstr"><vt:lpstr>Sheet1</vt:lpstr><vt:lpstr>Sheet2</vt:lpstr></vt:vector></TitlesOfParts>
+</Properties>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+
+  workbook.deleteSheet("Sheet2");
+
+  assert.deepEqual(workbook.getSheets().map((sheet) => sheet.name), ["Sheet1"]);
+  assert.equal(workbook.getSheet("Sheet1").getFormula("A1"), "#REF!");
+  assert.equal(workbook.listEntries().includes("xl/worksheets/sheet2.xml"), false);
+
+  const workbookXml = entryText(workbook.toEntries(), "xl/workbook.xml");
+  const relsXml = entryText(workbook.toEntries(), "xl/_rels/workbook.xml.rels");
+  const contentTypesXml = entryText(workbook.toEntries(), "[Content_Types].xml");
+  const appXml = entryText(workbook.toEntries(), "docProps/app.xml");
+
+  assert.doesNotMatch(workbookXml, /Sheet2/);
+  assert.match(workbookXml, /<definedName name="ExternalRef">#REF!<\/definedName>/);
+  assert.doesNotMatch(workbookXml, /LocalToSheet2/);
+  assert.doesNotMatch(relsXml, /Target="worksheets\/sheet2\.xml"/);
+  assert.doesNotMatch(contentTypesXml, /PartName="\/xl\/worksheets\/sheet2\.xml"/);
+  assert.match(appXml, /<vt:i4>1<\/vt:i4>/);
+  assert.match(appXml, /<vt:lpstr>Sheet1<\/vt:lpstr>/);
+  assert.doesNotMatch(appXml, /Sheet2/);
 });
 
 async function loadFixtureEntries(rootDirectory: string): Promise<Array<{ path: string; data: Uint8Array }>> {

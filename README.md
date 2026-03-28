@@ -52,6 +52,8 @@
 - `workbook.listEntries()`
 - `workbook.getSheets()`
 - `workbook.getSheet(name)`
+- `workbook.addSheet(name)`
+- `workbook.deleteSheet(name)`
 - `sheet.cell(address)`
 - `sheet.getCell(address)`
 - `sheet.getHeaders(headerRowNumber?)`
@@ -91,6 +93,7 @@
 const workbook = await Workbook.open("input.xlsx");
 const sheet = workbook.getSheet("Sheet1");
 const scoreCell = sheet.cell("B2");
+const detailSheet = workbook.addSheet("Detail");
 
 sheet.setCell("A1", "Hello");
 sheet.deleteRow(8);
@@ -123,6 +126,8 @@ sheet.setRange("B2", [
 ]);
 sheet.addMergedRange("D1:E1");
 sheet.setFormula("B1", "SUM(1,2)", { cachedValue: 3 });
+detailSheet.setCell("A1", "created");
+workbook.deleteSheet("Temp");
 console.log(scoreCell.value, scoreCell.styleId, scoreCell.formula);
 
 await workbook.save("output.xlsx");
@@ -135,9 +140,10 @@ await workbook.save("output.xlsx");
 - 后续 `getCell` / `getFormula` 会直接走索引查找，不再每次整张表做字符串匹配
 - 每次写入后会重建该表索引，保证后续读取拿到的是最新结果
 - 修改工作表后会同步维护 `<dimension ref="...">`，避免使用范围信息过期
-- `deleteRow()` / `deleteColumn()` 当前会同步更新本 sheet 的单元格坐标、公式引用、合并区域、`dimension`，以及其它 sheet 里显式引用它的公式
-- `insertRow()` 当前会同步更新本 sheet 的单元格坐标、公式引用、合并区域、`dimension`，以及其它 sheet 里显式引用它的公式
-- `insertColumn()` 当前会同步更新本 sheet 的单元格坐标、公式引用、合并区域、`dimension`，以及其它 sheet 里显式引用它的公式
+- `deleteRow()` / `deleteColumn()` 当前会同步更新本 sheet 的单元格坐标、公式引用、合并区域、`dimension`、常见 `ref/sqref` 属性、`definedNames`，以及其它 sheet 里显式引用它的公式
+- `insertRow()` 当前会同步更新本 sheet 的单元格坐标、公式引用、合并区域、`dimension`、常见 `ref/sqref` 属性、`definedNames`，以及其它 sheet 里显式引用它的公式
+- `insertColumn()` 当前会同步更新本 sheet 的单元格坐标、公式引用、合并区域、`dimension`、常见 `ref/sqref` 属性、`definedNames`，以及其它 sheet 里显式引用它的公式
+- `workbook.addSheet()` / `workbook.deleteSheet()` 当前会同步维护 `workbook.xml`、rels、`[Content_Types].xml`，并在删除 sheet 时修正剩余公式与 `definedNames`
 
 ## 当前限制
 

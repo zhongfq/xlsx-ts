@@ -55,6 +55,8 @@
 - `workbook.getSheets()`
 - `workbook.getSheet(name)`
 - `workbook.getActiveSheet()`
+- `workbook.getStyle(styleId)`
+- `workbook.cloneStyle(styleId, patch?)`
 - `workbook.getSheetVisibility(name)`
 - `workbook.getDefinedNames()`
 - `workbook.getDefinedName(name, scope?)`
@@ -73,10 +75,14 @@
 - `sheet.getCell(rowNumber, column)`
 - `sheet.getStyleId(address)`
 - `sheet.getStyleId(rowNumber, column)`
+- `sheet.getStyle(address)`
+- `sheet.getStyle(rowNumber, column)`
 - `sheet.getRowStyleId(rowNumber)`
 - `sheet.getColumnStyleId(column)`
 - `sheet.copyStyle(sourceAddress, targetAddress)`
 - `sheet.copyStyle(sourceRowNumber, sourceColumn, targetRowNumber, targetColumn)`
+- `sheet.cloneStyle(address, patch?)`
+- `sheet.cloneStyle(rowNumber, column, patch?)`
 - `sheet.getCellEntries()`
 - `sheet.iterCellEntries()`
 - `sheet.rowCount`
@@ -228,14 +234,17 @@ await workbook.save("output.xlsx");
 说明：
 
 - 同一张工作表首次读写时会扫描一次 `sheetData`，建立单元格与行的位置索引
-- `sheet.cell(address)` 返回可复用的 `Cell` 句柄，值/公式/样式索引会按工作表 revision 缓存
+- `sheet.cell(address)` 返回可复用的 `Cell` 句柄，值/公式/样式索引会按工作表 revision 缓存；现在也可以通过 `cell.style` 读取当前样式定义，并用 `cell.cloneStyle(patch?)` 直接派生一个新样式
 - `sheet.cell()` / `getCell()` / `setCell()` / `getFormula()` / `setFormula()` 现在同时支持 `A1` 地址和 `(rowNumber, column)` 两种调用方式；行列索引是从 `1` 开始
 - 后续 `getCell` / `getFormula` 会直接走索引查找，不再每次整张表做字符串匹配
 - `sheet.rowCount` / `sheet.columnCount` 当前表示已用区域的最大行号 / 最大列号；空表返回 `0`
 - `sheet.getCellEntries()` / `iterCellEntries()` / `getRowEntries()` / `getColumnEntries()` 会按 worksheet 中真实存在的 `<c>` 节点返回带地址、行列号、类型、样式索引和值的对象，适合大表和稀疏表遍历
 - `sheet.deleteCell()` 会真正移除 worksheet 里的 `<c>` 节点；如果你只是想保留样式占位但把值清空，继续用 `setCell(..., null)`
-- `sheet.getStyleId()` / `setStyleId()` 当前读写单元格上的 `s="..."` 样式索引；支持 `A1` 和 `(rowNumber, column)` 两种调用，但还不直接编辑 `styles.xml`
-- `sheet.getRowStyleId()` / `setRowStyleId()` 当前读写 `<row s="..." customFormat="1">` 这一层的行级样式索引；同样不会直接编辑 `styles.xml`
+- `workbook.getStyle()` 会读取 `styles.xml` 里的 `cellXfs` 样式定义；`workbook.cloneStyle()` 会基于已有 `xf` 追加一个新样式，并返回新的 `styleId`
+- `sheet.getStyle()` 会按单元格当前的 `styleId` 读取样式定义；如果单元格本身没有 `s="..."`，会回退到默认样式 `0`
+- `sheet.cloneStyle()` 会基于当前单元格样式克隆出一个新的 `styleId`，写回 `styles.xml`，并把新样式直接应用到该单元格；同样支持 `A1` 和 `(rowNumber, column)`
+- `sheet.getStyleId()` / `setStyleId()` 仍然只负责读写单元格上的 `s="..."` 样式索引
+- `sheet.getRowStyleId()` / `setRowStyleId()` 当前读写 `<row s="..." customFormat="1">` 这一层的行级样式索引；这一层本身不会修改 `styles.xml`
 - `sheet.getColumnStyleId()` / `setColumnStyleId()` 当前读写 `<cols><col ... style="..."/>` 这一层的列级样式索引；插删列时这些范围也会一起跟着移动
 - `sheet.copyStyle()` 当前会把源单元格的 `styleId` 复制到目标单元格，不会改动目标单元格的值或公式；同样支持地址和 `(rowNumber, column)` 两种调用
 - `sheet.getFreezePane()` / `freezePane()` / `unfreezePane()` 当前维护 worksheet `sheetViews/sheetView/pane`；插删行列时 `topLeftCell` 也会继续跟随更新

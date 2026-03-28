@@ -22,6 +22,64 @@ export interface CellEntry extends CellSnapshot {
   columnNumber: number;
 }
 
+export interface CellStyleAlignment {
+  horizontal?: string;
+  vertical?: string;
+  textRotation?: number;
+  wrapText?: boolean;
+  shrinkToFit?: boolean;
+  indent?: number;
+  relativeIndent?: number;
+  justifyLastLine?: boolean;
+  readingOrder?: number;
+}
+
+export interface CellStyleAlignmentPatch {
+  horizontal?: string | null;
+  vertical?: string | null;
+  textRotation?: number | null;
+  wrapText?: boolean | null;
+  shrinkToFit?: boolean | null;
+  indent?: number | null;
+  relativeIndent?: number | null;
+  justifyLastLine?: boolean | null;
+  readingOrder?: number | null;
+}
+
+export interface CellStyleDefinition {
+  numFmtId: number;
+  fontId: number;
+  fillId: number;
+  borderId: number;
+  xfId: number | null;
+  quotePrefix: boolean | null;
+  pivotButton: boolean | null;
+  applyNumberFormat: boolean | null;
+  applyFont: boolean | null;
+  applyFill: boolean | null;
+  applyBorder: boolean | null;
+  applyAlignment: boolean | null;
+  applyProtection: boolean | null;
+  alignment: CellStyleAlignment | null;
+}
+
+export interface CellStylePatch {
+  numFmtId?: number;
+  fontId?: number;
+  fillId?: number;
+  borderId?: number;
+  xfId?: number | null;
+  quotePrefix?: boolean | null;
+  pivotButton?: boolean | null;
+  applyNumberFormat?: boolean | null;
+  applyFont?: boolean | null;
+  applyFill?: boolean | null;
+  applyBorder?: boolean | null;
+  applyAlignment?: boolean | null;
+  applyProtection?: boolean | null;
+  alignment?: CellStyleAlignmentPatch | null;
+}
+
 export interface DefinedName {
   hidden: boolean;
   name: string;

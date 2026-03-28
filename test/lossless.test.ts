@@ -241,6 +241,118 @@ test("copyStyle APIs copy style indexes without changing target values", async (
   assert.match(sheetXml, /<c r="A2" s="2"\/>/);
 });
 
+test("style definition APIs read and clone workbook cellXfs", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = await loadFixtureEntries(fixtureDir);
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  assert.deepEqual(workbook.getStyle(0), {
+    numFmtId: 0,
+    fontId: 0,
+    fillId: 0,
+    borderId: 0,
+    xfId: 0,
+    quotePrefix: null,
+    pivotButton: null,
+    applyNumberFormat: null,
+    applyFont: null,
+    applyFill: null,
+    applyBorder: null,
+    applyAlignment: null,
+    applyProtection: null,
+    alignment: null,
+  });
+  assert.deepEqual(sheet.getStyle("A1"), {
+    numFmtId: 0,
+    fontId: 1,
+    fillId: 0,
+    borderId: 0,
+    xfId: 0,
+    quotePrefix: null,
+    pivotButton: null,
+    applyNumberFormat: null,
+    applyFont: true,
+    applyFill: null,
+    applyBorder: null,
+    applyAlignment: null,
+    applyProtection: null,
+    alignment: null,
+  });
+  assert.equal(sheet.cell(1, 1).style?.fontId, 1);
+
+  const clonedBoldStyleId = workbook.cloneStyle(1, {
+    numFmtId: 14,
+    applyNumberFormat: true,
+    applyAlignment: true,
+    alignment: {
+      horizontal: "center",
+      wrapText: true,
+    },
+  });
+  const clonedDefaultStyleId = sheet.cloneStyle(2, 2, {
+    applyAlignment: true,
+    alignment: {
+      horizontal: "right",
+    },
+  });
+
+  assert.equal(clonedBoldStyleId, 2);
+  assert.equal(clonedDefaultStyleId, 3);
+  assert.deepEqual(workbook.getStyle(clonedBoldStyleId), {
+    numFmtId: 14,
+    fontId: 1,
+    fillId: 0,
+    borderId: 0,
+    xfId: 0,
+    quotePrefix: null,
+    pivotButton: null,
+    applyNumberFormat: true,
+    applyFont: true,
+    applyFill: null,
+    applyBorder: null,
+    applyAlignment: true,
+    applyProtection: null,
+    alignment: {
+      horizontal: "center",
+      wrapText: true,
+    },
+  });
+  assert.deepEqual(sheet.getStyle(2, 2), {
+    numFmtId: 0,
+    fontId: 0,
+    fillId: 0,
+    borderId: 0,
+    xfId: 0,
+    quotePrefix: null,
+    pivotButton: null,
+    applyNumberFormat: null,
+    applyFont: null,
+    applyFill: null,
+    applyBorder: null,
+    applyAlignment: true,
+    applyProtection: null,
+    alignment: {
+      horizontal: "right",
+    },
+  });
+  assert.equal(sheet.getStyleId("B2"), 3);
+
+  const stylesXml = entryText(workbook.toEntries(), "xl/styles.xml");
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+
+  assert.match(stylesXml, /<cellXfs count="4">/);
+  assert.match(
+    stylesXml,
+    /<xf numFmtId="14" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyNumberFormat="1" applyAlignment="1"><alignment horizontal="center" wrapText="1"\/><\/xf>/,
+  );
+  assert.match(
+    stylesXml,
+    /<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment horizontal="right"\/><\/xf>/,
+  );
+  assert.match(sheetXml, /<c r="B2" s="3"\/>/);
+});
+
 test("row style id APIs read and write row-level style indexes", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = replaceEntryText(

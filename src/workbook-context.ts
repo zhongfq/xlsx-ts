@@ -8,6 +8,7 @@ export interface WorkbookContext {
   workbookPath: string;
   workbookRelsPath: string;
   sharedStringsPath?: string;
+  stylesPath?: string;
   sheets: Sheet[];
 }
 
@@ -25,12 +26,14 @@ export function resolveWorkbookContext(
   const relationships = parseRelationships(workbookRelsXml, workbookDir);
   const sheets = parseSheets(workbook, workbookXml, relationships);
   const sharedStringsPath = findRelationshipTarget(workbookRelsXml, /\/sharedStrings$/, workbookDir);
+  const stylesPath = findRelationshipTarget(workbookRelsXml, /\/styles$/, workbookDir);
 
   return {
     workbookDir,
     workbookPath,
     workbookRelsPath,
     sharedStringsPath,
+    stylesPath,
     sheets,
   };
 }

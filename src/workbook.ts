@@ -1,4 +1,13 @@
-import type { ArchiveEntry, DefinedName, SetDefinedNameOptions, SheetVisibility } from "./types.js";
+import type {
+  ArchiveEntry,
+  CellStyleAlignment,
+  CellStyleAlignmentPatch,
+  CellStyleDefinition,
+  CellStylePatch,
+  DefinedName,
+  SetDefinedNameOptions,
+  SheetVisibility,
+} from "./types.js";
 import { XlsxError } from "./errors.js";
 import {
   Sheet,
@@ -28,12 +37,26 @@ const WORKSHEET_CONTENT_TYPE =
 const WORKSHEET_RELATIONSHIP_TYPE =
   "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet";
 
+interface ParsedCellStyle {
+  alignmentAttributes: Array<[string, string]> | null;
+  attributes: Array<[string, string]>;
+  definition: CellStyleDefinition;
+  extraChildrenXml: string;
+}
+
+interface StylesCache {
+  cellXfs: ParsedCellStyle[];
+  path: string;
+  xml: string;
+}
+
 export class Workbook {
   private readonly adapter: Zip;
   private readonly entryOrder: string[];
   private readonly entries: Map<string, Uint8Array>;
   private workbookContext?: WorkbookContext;
   private sharedStringsCache?: string[];
+  private stylesCache?: StylesCache | null;
 
   constructor(entries: Iterable<ArchiveEntry>, adapter = new Zip()) {
     this.adapter = adapter;
@@ -78,6 +101,33 @@ export class Workbook {
     const context = this.getWorkbookContext();
     const activeSheetIndex = parseActiveSheetIndex(this.readEntryText(context.workbookPath), context.sheets.length);
     return context.sheets[activeSheetIndex] ?? context.sheets[0]!;
+  }
+
+  getStyle(styleId: number): CellStyleDefinition | null {
+    assertStyleId(styleId);
+    return cloneCellStyleDefinition(this.getStylesCache()?.cellXfs[styleId]?.definition ?? null);
+  }
+
+  cloneStyle(styleId: number, patch: CellStylePatch = {}): number {
+    assertStyleId(styleId);
+    assertCellStylePatch(patch);
+
+    const styles = this.getStylesCache();
+    if (!styles) {
+      throw new XlsxError("Workbook styles.xml not found");
+    }
+
+    const sourceStyle = styles.cellXfs[styleId];
+    if (!sourceStyle) {
+      throw new XlsxError(`Style not found: ${styleId}`);
+    }
+
+    const nextStyleId = styles.cellXfs.length;
+    this.writeEntryText(
+      styles.path,
+      appendCellXfToStylesXml(styles.xml, buildClonedCellXfXml(sourceStyle, patch)),
+    );
+    return nextStyleId;
   }
 
   setActiveSheet(sheetName: string): Sheet {
@@ -417,6 +467,21 @@ export class Workbook {
     return this.sharedStringsCache;
   }
 
+  private getStylesCache(): StylesCache | null {
+    if (this.stylesCache !== undefined) {
+      return this.stylesCache;
+    }
+
+    const stylesPath = this.getWorkbookContext().stylesPath;
+    if (!stylesPath || !this.entries.has(stylesPath)) {
+      this.stylesCache = null;
+      return this.stylesCache;
+    }
+
+    this.stylesCache = parseStylesXml(stylesPath, this.readEntryText(stylesPath));
+    return this.stylesCache;
+  }
+
   rewriteDefinedNamesForSheetStructure(
     sheetName: string,
     targetColumnNumber: number,
@@ -563,10 +628,15 @@ export class Workbook {
       this.sharedStringsCache = undefined;
     }
 
+    if (this.workbookContext?.stylesPath === path) {
+      this.stylesCache = undefined;
+    }
+
     if (
       this.workbookContext &&
       (this.workbookContext.workbookPath === path || this.workbookContext.workbookRelsPath === path)
     ) {
+      this.stylesCache = undefined;
       this.workbookContext = undefined;
     }
 
@@ -586,18 +656,349 @@ export class Workbook {
     if (
       this.workbookContext &&
       (this.workbookContext.sharedStringsPath === path ||
+        this.workbookContext.stylesPath === path ||
         this.workbookContext.workbookPath === path ||
         this.workbookContext.workbookRelsPath === path)
     ) {
       this.sharedStringsCache = undefined;
+      this.stylesCache = undefined;
       this.workbookContext = undefined;
     }
   }
 }
 
+function parseStylesXml(path: string, xml: string): StylesCache {
+  const cellXfsMatch = xml.match(/<cellXfs\b([^>]*)>([\s\S]*?)<\/cellXfs>/);
+  if (!cellXfsMatch) {
+    throw new XlsxError("styles.xml is missing <cellXfs>");
+  }
+
+  return {
+    path,
+    xml,
+    cellXfs: Array.from(cellXfsMatch[2].matchAll(/<xf\b([^>]*?)(?:\/>|>([\s\S]*?)<\/xf>)/g), (match) =>
+      parseCellStyle(match[1], match[2] ?? ""),
+    ),
+  };
+}
+
+function parseCellStyle(attributesSource: string, innerXml: string): ParsedCellStyle {
+  const attributes = parseAttributes(attributesSource);
+  const alignmentMatch = innerXml.match(/<alignment\b([^>]*?)(?:\/>|>[\s\S]*?<\/alignment>)/);
+  const alignmentAttributes = alignmentMatch ? parseAttributes(alignmentMatch[1]) : null;
+  const extraChildrenXml =
+    alignmentMatch && alignmentMatch.index !== undefined
+      ? innerXml.slice(0, alignmentMatch.index) + innerXml.slice(alignmentMatch.index + alignmentMatch[0].length)
+      : innerXml;
+
+  return {
+    alignmentAttributes,
+    attributes,
+    definition: {
+      numFmtId: parseRequiredIntegerAttribute(attributes, "numFmtId", 0),
+      fontId: parseRequiredIntegerAttribute(attributes, "fontId", 0),
+      fillId: parseRequiredIntegerAttribute(attributes, "fillId", 0),
+      borderId: parseRequiredIntegerAttribute(attributes, "borderId", 0),
+      xfId: parseOptionalIntegerAttribute(attributes, "xfId"),
+      quotePrefix: parseOptionalBooleanAttribute(attributes, "quotePrefix"),
+      pivotButton: parseOptionalBooleanAttribute(attributes, "pivotButton"),
+      applyNumberFormat: parseOptionalBooleanAttribute(attributes, "applyNumberFormat"),
+      applyFont: parseOptionalBooleanAttribute(attributes, "applyFont"),
+      applyFill: parseOptionalBooleanAttribute(attributes, "applyFill"),
+      applyBorder: parseOptionalBooleanAttribute(attributes, "applyBorder"),
+      applyAlignment: parseOptionalBooleanAttribute(attributes, "applyAlignment"),
+      applyProtection: parseOptionalBooleanAttribute(attributes, "applyProtection"),
+      alignment: alignmentAttributes ? parseAlignmentDefinition(alignmentAttributes) : null,
+    },
+    extraChildrenXml,
+  };
+}
+
+function parseAlignmentDefinition(attributes: Array<[string, string]>): CellStyleAlignment {
+  const alignment: CellStyleAlignment = {};
+
+  assignStringAttribute(alignment, "horizontal", findAttributeValue(attributes, "horizontal"));
+  assignStringAttribute(alignment, "vertical", findAttributeValue(attributes, "vertical"));
+  assignNumberAttribute(alignment, "textRotation", findAttributeValue(attributes, "textRotation"));
+  assignBooleanAttribute(alignment, "wrapText", findAttributeValue(attributes, "wrapText"));
+  assignBooleanAttribute(alignment, "shrinkToFit", findAttributeValue(attributes, "shrinkToFit"));
+  assignNumberAttribute(alignment, "indent", findAttributeValue(attributes, "indent"));
+  assignNumberAttribute(alignment, "relativeIndent", findAttributeValue(attributes, "relativeIndent"));
+  assignBooleanAttribute(alignment, "justifyLastLine", findAttributeValue(attributes, "justifyLastLine"));
+  assignNumberAttribute(alignment, "readingOrder", findAttributeValue(attributes, "readingOrder"));
+
+  return alignment;
+}
+
+function appendCellXfToStylesXml(stylesXml: string, xfXml: string): string {
+  const cellXfsMatch = stylesXml.match(/<cellXfs\b([^>]*)>([\s\S]*?)<\/cellXfs>/);
+  if (!cellXfsMatch || cellXfsMatch.index === undefined) {
+    throw new XlsxError("styles.xml is missing <cellXfs>");
+  }
+
+  const attributes = parseAttributes(cellXfsMatch[1]);
+  const nextCount = Array.from(cellXfsMatch[2].matchAll(/<xf\b/g)).length + 1;
+  const nextAttributes = upsertAttribute(attributes, "count", String(nextCount));
+  const serializedAttributes = serializeAttributes(nextAttributes);
+  const trailingWhitespace = cellXfsMatch[2].match(/\s*$/)?.[0] ?? "";
+  const innerXmlWithoutTrailing = cellXfsMatch[2].slice(0, cellXfsMatch[2].length - trailingWhitespace.length);
+  const closingIndentMatch = trailingWhitespace.match(/\n([ \t]*)$/);
+  const entryPrefix = closingIndentMatch ? `\n${closingIndentMatch[1]}  ` : "";
+  const nextInnerXml = `${innerXmlWithoutTrailing}${entryPrefix}${xfXml}${trailingWhitespace}`;
+  const nextCellXfsXml = `<cellXfs${serializedAttributes ? ` ${serializedAttributes}` : ""}>${nextInnerXml}</cellXfs>`;
+
+  return (
+    stylesXml.slice(0, cellXfsMatch.index) +
+    nextCellXfsXml +
+    stylesXml.slice(cellXfsMatch.index + cellXfsMatch[0].length)
+  );
+}
+
+function buildClonedCellXfXml(sourceStyle: ParsedCellStyle, patch: CellStylePatch): string {
+  const attributes = applyCellStylePatch(sourceStyle.attributes, patch);
+  const alignmentAttributes = applyAlignmentPatch(sourceStyle.alignmentAttributes, patch.alignment);
+  const alignmentXml = alignmentAttributes ? buildSelfClosingTag("alignment", alignmentAttributes) : "";
+  const innerXml = alignmentXml + sourceStyle.extraChildrenXml;
+  const serializedAttributes = serializeAttributes(attributes);
+
+  if (innerXml.length === 0) {
+    return `<xf${serializedAttributes ? ` ${serializedAttributes}` : ""}/>`;
+  }
+
+  return `<xf${serializedAttributes ? ` ${serializedAttributes}` : ""}>${innerXml}</xf>`;
+}
+
+function applyCellStylePatch(attributes: Array<[string, string]>, patch: CellStylePatch): Array<[string, string]> {
+  let nextAttributes = [...attributes];
+
+  nextAttributes = applyRequiredIntegerPatch(nextAttributes, "numFmtId", patch.numFmtId);
+  nextAttributes = applyRequiredIntegerPatch(nextAttributes, "fontId", patch.fontId);
+  nextAttributes = applyRequiredIntegerPatch(nextAttributes, "fillId", patch.fillId);
+  nextAttributes = applyRequiredIntegerPatch(nextAttributes, "borderId", patch.borderId);
+  nextAttributes = applyOptionalIntegerPatch(nextAttributes, "xfId", patch.xfId);
+  nextAttributes = applyOptionalBooleanPatch(nextAttributes, "quotePrefix", patch.quotePrefix);
+  nextAttributes = applyOptionalBooleanPatch(nextAttributes, "pivotButton", patch.pivotButton);
+  nextAttributes = applyOptionalBooleanPatch(nextAttributes, "applyNumberFormat", patch.applyNumberFormat);
+  nextAttributes = applyOptionalBooleanPatch(nextAttributes, "applyFont", patch.applyFont);
+  nextAttributes = applyOptionalBooleanPatch(nextAttributes, "applyFill", patch.applyFill);
+  nextAttributes = applyOptionalBooleanPatch(nextAttributes, "applyBorder", patch.applyBorder);
+  nextAttributes = applyOptionalBooleanPatch(nextAttributes, "applyAlignment", patch.applyAlignment);
+  nextAttributes = applyOptionalBooleanPatch(nextAttributes, "applyProtection", patch.applyProtection);
+
+  return nextAttributes;
+}
+
+function applyAlignmentPatch(
+  attributes: Array<[string, string]> | null,
+  patch: CellStyleAlignmentPatch | null | undefined,
+): Array<[string, string]> | null {
+  if (patch === undefined) {
+    return attributes ? [...attributes] : null;
+  }
+
+  if (patch === null) {
+    return null;
+  }
+
+  let nextAttributes = attributes ? [...attributes] : [];
+  nextAttributes = applyOptionalStringPatch(nextAttributes, "horizontal", patch.horizontal);
+  nextAttributes = applyOptionalStringPatch(nextAttributes, "vertical", patch.vertical);
+  nextAttributes = applyOptionalIntegerPatch(nextAttributes, "textRotation", patch.textRotation);
+  nextAttributes = applyOptionalBooleanPatch(nextAttributes, "wrapText", patch.wrapText);
+  nextAttributes = applyOptionalBooleanPatch(nextAttributes, "shrinkToFit", patch.shrinkToFit);
+  nextAttributes = applyOptionalIntegerPatch(nextAttributes, "indent", patch.indent);
+  nextAttributes = applyOptionalIntegerPatch(nextAttributes, "relativeIndent", patch.relativeIndent);
+  nextAttributes = applyOptionalBooleanPatch(nextAttributes, "justifyLastLine", patch.justifyLastLine);
+  nextAttributes = applyOptionalIntegerPatch(nextAttributes, "readingOrder", patch.readingOrder);
+
+  return nextAttributes.length === 0 ? null : nextAttributes;
+}
+
+function buildSelfClosingTag(tagName: string, attributes: Array<[string, string]>): string {
+  const serializedAttributes = serializeAttributes(attributes);
+  return `<${tagName}${serializedAttributes ? ` ${serializedAttributes}` : ""}/>`;
+}
+
+function cloneCellStyleDefinition(style: CellStyleDefinition | null): CellStyleDefinition | null {
+  if (!style) {
+    return null;
+  }
+
+  return {
+    ...style,
+    alignment: style.alignment ? { ...style.alignment } : null,
+  };
+}
+
+function findAttributeValue(attributes: Array<[string, string]>, name: string): string | undefined {
+  return attributes.find(([attributeName]) => attributeName === name)?.[1];
+}
+
+function parseRequiredIntegerAttribute(
+  attributes: Array<[string, string]>,
+  name: string,
+  fallback: number,
+): number {
+  const value = findAttributeValue(attributes, name);
+  return value === undefined ? fallback : Number(value);
+}
+
+function parseOptionalIntegerAttribute(attributes: Array<[string, string]>, name: string): number | null {
+  const value = findAttributeValue(attributes, name);
+  return value === undefined ? null : Number(value);
+}
+
+function parseOptionalBooleanAttribute(attributes: Array<[string, string]>, name: string): boolean | null {
+  const value = findAttributeValue(attributes, name);
+  if (value === undefined) {
+    return null;
+  }
+
+  return value === "1" || value === "true";
+}
+
+function assignStringAttribute(target: CellStyleAlignment, name: keyof CellStyleAlignment, value?: string): void {
+  if (value !== undefined) {
+    target[name] = value as never;
+  }
+}
+
+function assignNumberAttribute(target: CellStyleAlignment, name: keyof CellStyleAlignment, value?: string): void {
+  if (value !== undefined) {
+    target[name] = Number(value) as never;
+  }
+}
+
+function assignBooleanAttribute(target: CellStyleAlignment, name: keyof CellStyleAlignment, value?: string): void {
+  if (value !== undefined) {
+    target[name] = (value === "1" || value === "true") as never;
+  }
+}
+
+function upsertAttribute(
+  attributes: Array<[string, string]>,
+  name: string,
+  value: string | null,
+): Array<[string, string]> {
+  const nextAttributes: Array<[string, string]> = [];
+  let found = false;
+
+  for (const [attributeName, attributeValue] of attributes) {
+    if (attributeName !== name) {
+      nextAttributes.push([attributeName, attributeValue]);
+      continue;
+    }
+
+    found = true;
+    if (value !== null) {
+      nextAttributes.push([attributeName, value]);
+    }
+  }
+
+  if (!found && value !== null) {
+    nextAttributes.push([name, value]);
+  }
+
+  return nextAttributes;
+}
+
+function applyRequiredIntegerPatch(
+  attributes: Array<[string, string]>,
+  name: string,
+  value: number | undefined,
+): Array<[string, string]> {
+  return value === undefined ? attributes : upsertAttribute(attributes, name, String(value));
+}
+
+function applyOptionalIntegerPatch(
+  attributes: Array<[string, string]>,
+  name: string,
+  value: number | null | undefined,
+): Array<[string, string]> {
+  return value === undefined ? attributes : upsertAttribute(attributes, name, value === null ? null : String(value));
+}
+
+function applyOptionalBooleanPatch(
+  attributes: Array<[string, string]>,
+  name: string,
+  value: boolean | null | undefined,
+): Array<[string, string]> {
+  return value === undefined ? attributes : upsertAttribute(attributes, name, value === null ? null : value ? "1" : "0");
+}
+
+function applyOptionalStringPatch(
+  attributes: Array<[string, string]>,
+  name: string,
+  value: string | null | undefined,
+): Array<[string, string]> {
+  return value === undefined ? attributes : upsertAttribute(attributes, name, value);
+}
+
 function assertSheetName(sheetName: string): void {
   if (sheetName.length === 0 || sheetName.length > 31 || /[\\/*?:[\]]/.test(sheetName)) {
     throw new XlsxError(`Invalid sheet name: ${sheetName}`);
+  }
+}
+
+function assertStyleId(styleId: number): void {
+  if (!Number.isInteger(styleId) || styleId < 0) {
+    throw new XlsxError(`Invalid style id: ${styleId}`);
+  }
+}
+
+function assertCellStylePatch(patch: CellStylePatch): void {
+  assertOptionalNonNegativeInteger(patch.numFmtId, "numFmtId");
+  assertOptionalNonNegativeInteger(patch.fontId, "fontId");
+  assertOptionalNonNegativeInteger(patch.fillId, "fillId");
+  assertOptionalNonNegativeInteger(patch.borderId, "borderId");
+  assertOptionalNullableNonNegativeInteger(patch.xfId, "xfId");
+  assertOptionalNullableBoolean(patch.quotePrefix, "quotePrefix");
+  assertOptionalNullableBoolean(patch.pivotButton, "pivotButton");
+  assertOptionalNullableBoolean(patch.applyNumberFormat, "applyNumberFormat");
+  assertOptionalNullableBoolean(patch.applyFont, "applyFont");
+  assertOptionalNullableBoolean(patch.applyFill, "applyFill");
+  assertOptionalNullableBoolean(patch.applyBorder, "applyBorder");
+  assertOptionalNullableBoolean(patch.applyAlignment, "applyAlignment");
+  assertOptionalNullableBoolean(patch.applyProtection, "applyProtection");
+
+  if (patch.alignment !== undefined && patch.alignment !== null) {
+    assertCellStyleAlignmentPatch(patch.alignment);
+  }
+}
+
+function assertCellStyleAlignmentPatch(patch: CellStyleAlignmentPatch): void {
+  assertOptionalNullableString(patch.horizontal, "alignment.horizontal");
+  assertOptionalNullableString(patch.vertical, "alignment.vertical");
+  assertOptionalNullableNonNegativeInteger(patch.textRotation, "alignment.textRotation");
+  assertOptionalNullableBoolean(patch.wrapText, "alignment.wrapText");
+  assertOptionalNullableBoolean(patch.shrinkToFit, "alignment.shrinkToFit");
+  assertOptionalNullableNonNegativeInteger(patch.indent, "alignment.indent");
+  assertOptionalNullableNonNegativeInteger(patch.relativeIndent, "alignment.relativeIndent");
+  assertOptionalNullableBoolean(patch.justifyLastLine, "alignment.justifyLastLine");
+  assertOptionalNullableNonNegativeInteger(patch.readingOrder, "alignment.readingOrder");
+}
+
+function assertOptionalNonNegativeInteger(value: number | undefined, name: string): void {
+  if (value !== undefined && (!Number.isInteger(value) || value < 0)) {
+    throw new XlsxError(`Invalid ${name}: ${value}`);
+  }
+}
+
+function assertOptionalNullableNonNegativeInteger(value: number | null | undefined, name: string): void {
+  if (value !== undefined && value !== null && (!Number.isInteger(value) || value < 0)) {
+    throw new XlsxError(`Invalid ${name}: ${value}`);
+  }
+}
+
+function assertOptionalNullableBoolean(value: boolean | null | undefined, name: string): void {
+  if (value !== undefined && value !== null && typeof value !== "boolean") {
+    throw new XlsxError(`Invalid ${name}: ${String(value)}`);
+  }
+}
+
+function assertOptionalNullableString(value: string | null | undefined, name: string): void {
+  if (value !== undefined && value !== null && typeof value !== "string") {
+    throw new XlsxError(`Invalid ${name}: ${String(value)}`);
   }
 }
 

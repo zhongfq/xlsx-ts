@@ -4,6 +4,10 @@ export { Workbook } from "./workbook.js";
 export type {
   ArchiveEntry,
   CellEntry,
+  CellStyleAlignment,
+  CellStyleAlignmentPatch,
+  CellStyleDefinition,
+  CellStylePatch,
   CellSnapshot,
   CellType,
   CellValue,

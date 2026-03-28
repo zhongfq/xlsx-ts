@@ -60,6 +60,8 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `workbook.getSheets()`
 - `workbook.getSheet(name)`
 - `workbook.getActiveSheet()`
+- `workbook.getStyle(styleId)`
+- `workbook.cloneStyle(styleId, patch?)`
 - `workbook.getSheetVisibility(name)`
 - `workbook.getDefinedNames()`
 - `workbook.getDefinedName(name, scope?)`
@@ -78,10 +80,14 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `sheet.getCell(rowNumber, column)`
 - `sheet.getStyleId(address)`
 - `sheet.getStyleId(rowNumber, column)`
+- `sheet.getStyle(address)`
+- `sheet.getStyle(rowNumber, column)`
 - `sheet.getRowStyleId(rowNumber)`
 - `sheet.getColumnStyleId(column)`
 - `sheet.copyStyle(sourceAddress, targetAddress)`
 - `sheet.copyStyle(sourceRowNumber, sourceColumn, targetRowNumber, targetColumn)`
+- `sheet.cloneStyle(address, patch?)`
+- `sheet.cloneStyle(rowNumber, column, patch?)`
 - `sheet.getCellEntries()`
 - `sheet.iterCellEntries()`
 - `sheet.rowCount`
@@ -233,14 +239,17 @@ await workbook.save("output.xlsx");
 Notes:
 
 - On first read/write access, a sheet scans `sheetData` once and builds indexes for rows and cells.
-- `sheet.cell(address)` returns a reusable `Cell` handle whose parsed value/formula/style state is cached by sheet revision.
+- `sheet.cell(address)` returns a reusable `Cell` handle whose parsed value/formula/style-index state is cached by sheet revision. It now also exposes `cell.style` and `cell.cloneStyle(patch?)`.
 - `sheet.cell()`, `getCell()`, `setCell()`, `getFormula()`, and `setFormula()` now support both `A1` addresses and `(rowNumber, column)` calls. Row and column indexes are 1-based.
 - Later `getCell()` and `getFormula()` calls use those indexes directly instead of running a full string match on every read.
 - `sheet.rowCount` and `sheet.columnCount` currently mean the maximum used row number and maximum used column number. Empty sheets return `0`.
 - `sheet.getCellEntries()`, `iterCellEntries()`, `getRowEntries()`, and `getColumnEntries()` expose the real worksheet `<c>` nodes with address, row/column indexes, type, style id, and value, which is useful for large or sparse sheet iteration.
 - `sheet.deleteCell()` removes the worksheet `<c>` node entirely; if you want to keep a styled placeholder but clear the value, continue using `setCell(..., null)`.
-- `sheet.getStyleId()` and `setStyleId()` currently read and write the cell-level `s="..."` style index; both `A1` and `(rowNumber, column)` calls are supported, but `styles.xml` is not edited directly yet.
-- `sheet.getRowStyleId()` and `setRowStyleId()` currently read and write the row-level `<row s="..." customFormat="1">` style index; `styles.xml` is still left untouched.
+- `workbook.getStyle()` reads `cellXfs` definitions from `styles.xml`, and `workbook.cloneStyle()` appends a new `<xf>` derived from an existing one and returns the new style id.
+- `sheet.getStyle()` resolves the cell's current style definition; when the cell has no explicit `s="..."`, it falls back to the default style `0`.
+- `sheet.cloneStyle()` clones the current cell style, writes the new definition into `styles.xml`, applies it back to the same cell, and supports both `A1` and `(rowNumber, column)` calls.
+- `sheet.getStyleId()` and `setStyleId()` still only read and write the cell-level `s="..."` style index itself.
+- `sheet.getRowStyleId()` and `setRowStyleId()` currently read and write the row-level `<row s="..." customFormat="1">` style index; that layer still does not modify `styles.xml`.
 - `sheet.getColumnStyleId()` and `setColumnStyleId()` currently read and write the column-level `<cols><col ... style="..."/>` style index, and those ranges are shifted during column insert/delete operations.
 - `sheet.copyStyle()` currently copies the source cell's `styleId` onto the target cell without changing the target cell's value or formula; both address and `(rowNumber, column)` calls are supported.
 - `sheet.getFreezePane()`, `freezePane()`, and `unfreezePane()` currently manage worksheet `sheetViews/sheetView/pane`; `topLeftCell` keeps tracking row and column insert/delete operations.

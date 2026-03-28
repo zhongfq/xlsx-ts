@@ -1,5 +1,12 @@
 import type { Sheet } from "./sheet.js";
-import type { CellSnapshot, CellType, CellValue, SetFormulaOptions } from "./types.js";
+import type {
+  CellSnapshot,
+  CellStyleDefinition,
+  CellStylePatch,
+  CellType,
+  CellValue,
+  SetFormulaOptions,
+} from "./types.js";
 
 export class Cell {
   readonly address: string;
@@ -29,6 +36,10 @@ export class Cell {
     return this.getSnapshot().styleId;
   }
 
+  get style(): CellStyleDefinition | null {
+    return this.sheet.getStyle(this.address);
+  }
+
   get type(): CellType {
     return this.getSnapshot().type;
   }
@@ -47,6 +58,10 @@ export class Cell {
 
   setStyleId(styleId: number | null): void {
     this.sheet.setStyleId(this.address, styleId);
+  }
+
+  cloneStyle(patch: CellStylePatch = {}): number {
+    return this.sheet.cloneStyle(this.address, patch);
   }
 
   private getSnapshot(): CellSnapshot {

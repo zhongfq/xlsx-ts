@@ -2,6 +2,8 @@ import { Cell } from "./cell.js";
 import type {
   CellEntry,
   CellSnapshot,
+  CellStyleDefinition,
+  CellStylePatch,
   CellValue,
   DataValidation,
   FreezePane,
@@ -108,6 +110,16 @@ export class Sheet {
     return this.readCellSnapshot(resolveCellAddress(addressOrRowNumber, column)).styleId;
   }
 
+  getStyle(address: string): CellStyleDefinition | null;
+  getStyle(rowNumber: number, column: number | string): CellStyleDefinition | null;
+  getStyle(addressOrRowNumber: string | number, column?: number | string): CellStyleDefinition | null {
+    const styleId =
+      typeof addressOrRowNumber === "number"
+        ? this.readCellSnapshotByIndexes(addressOrRowNumber, column).styleId
+        : this.readCellSnapshot(resolveCellAddress(addressOrRowNumber, column)).styleId;
+    return this.workbook.getStyle(styleId ?? 0);
+  }
+
   getColumnStyleId(column: number | string): number | null {
     const columnNumber = normalizeColumnNumber(column);
     return parseColumnStyleId(this.getSheetIndex().xml, columnNumber);
@@ -133,6 +145,23 @@ export class Sheet {
       targetColumn,
     );
     this.setStyleId(targetAddress, this.getStyleId(sourceAddress));
+  }
+
+  cloneStyle(address: string, patch?: CellStylePatch): number;
+  cloneStyle(rowNumber: number, column: number | string, patch?: CellStylePatch): number;
+  cloneStyle(
+    addressOrRowNumber: string | number,
+    columnOrPatch?: number | string | CellStylePatch,
+    patch?: CellStylePatch,
+  ): number {
+    const normalizedAddress = resolveCellAddress(
+      addressOrRowNumber,
+      typeof addressOrRowNumber === "number" ? (columnOrPatch as number | string) : undefined,
+    );
+    const nextPatch = resolveCloneStylePatch(addressOrRowNumber, columnOrPatch, patch);
+    const nextStyleId = this.workbook.cloneStyle(this.getStyleId(normalizedAddress) ?? 0, nextPatch);
+    this.setStyleId(normalizedAddress, nextStyleId);
+    return nextStyleId;
   }
 
   rename(name: string): void {
@@ -4052,6 +4081,14 @@ function assertStyleId(styleId: number | null): void {
   if (styleId !== null && (!Number.isInteger(styleId) || styleId < 0)) {
     throw new XlsxError(`Invalid style id: ${styleId}`);
   }
+}
+
+function resolveCloneStylePatch(
+  addressOrRowNumber: string | number,
+  columnOrPatch: number | string | CellStylePatch | undefined,
+  patch: CellStylePatch | undefined,
+): CellStylePatch {
+  return typeof addressOrRowNumber === "number" ? (patch ?? {}) : ((columnOrPatch as CellStylePatch | undefined) ?? {});
 }
 
 function resolveSetStyleId(

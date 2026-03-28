@@ -152,6 +152,20 @@ export class Sheet {
     this.setStyleId(targetAddress, this.getStyleId(sourceAddress));
   }
 
+  setStyle(address: string, patch: CellStylePatch): number;
+  setStyle(rowNumber: number, column: number | string, patch: CellStylePatch): number;
+  setStyle(
+    addressOrRowNumber: string | number,
+    columnOrPatch: number | string | CellStylePatch,
+    patch?: CellStylePatch,
+  ): number {
+    if (typeof addressOrRowNumber === "number") {
+      return this.cloneStyle(addressOrRowNumber, columnOrPatch as number | string, patch);
+    }
+
+    return this.cloneStyle(addressOrRowNumber, (columnOrPatch as CellStylePatch | undefined) ?? {});
+  }
+
   cloneStyle(address: string, patch?: CellStylePatch): number;
   cloneStyle(rowNumber: number, column: number | string, patch?: CellStylePatch): number;
   cloneStyle(

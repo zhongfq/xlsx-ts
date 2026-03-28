@@ -89,6 +89,8 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `sheet.getColumnStyle(column)`
 - `sheet.copyStyle(sourceAddress, targetAddress)`
 - `sheet.copyStyle(sourceRowNumber, sourceColumn, targetRowNumber, targetColumn)`
+- `sheet.setStyle(address, patch)`
+- `sheet.setStyle(rowNumber, column, patch)`
 - `sheet.cloneStyle(address, patch?)`
 - `sheet.cloneStyle(rowNumber, column, patch?)`
 - `sheet.cloneRowStyle(rowNumber, patch?)`
@@ -244,7 +246,7 @@ await workbook.save("output.xlsx");
 Notes:
 
 - On first read/write access, a sheet scans `sheetData` once and builds indexes for rows and cells.
-- `sheet.cell(address)` returns a reusable `Cell` handle whose parsed value/formula/style-index state is cached by sheet revision. It now also exposes `cell.style` and `cell.cloneStyle(patch?)`.
+- `sheet.cell(address)` returns a reusable `Cell` handle whose parsed value/formula/style-index state is cached by sheet revision. It now also exposes `cell.style`, `cell.setStyle(patch)`, and `cell.cloneStyle(patch?)`.
 - `sheet.cell()`, `getCell()`, `setCell()`, `getFormula()`, and `setFormula()` now support both `A1` addresses and `(rowNumber, column)` calls. Row and column indexes are 1-based.
 - Later `getCell()` and `getFormula()` calls use those indexes directly instead of running a full string match on every read.
 - `sheet.rowCount` and `sheet.columnCount` currently mean the maximum used row number and maximum used column number. Empty sheets return `0`.
@@ -252,6 +254,7 @@ Notes:
 - `sheet.deleteCell()` removes the worksheet `<c>` node entirely; if you want to keep a styled placeholder but clear the value, continue using `setCell(..., null)`.
 - `workbook.getStyle()` reads `cellXfs` definitions from `styles.xml`, `workbook.updateStyle()` patches an existing `<xf>` in place, and `workbook.cloneStyle()` appends a new `<xf>` derived from an existing one and returns the new style id.
 - `sheet.getStyle()` resolves the cell's current style definition; when the cell has no explicit `s="..."`, it falls back to the default style `0`.
+- `sheet.setStyle()` clones the current cell style into a new `styleId`, writes that new definition into `styles.xml`, and applies it back to the same cell so other cells sharing the old style id stay untouched.
 - `sheet.cloneStyle()` clones the current cell style, writes the new definition into `styles.xml`, applies it back to the same cell, and supports both `A1` and `(rowNumber, column)` calls.
 - `sheet.getStyleId()` and `setStyleId()` still only read and write the cell-level `s="..."` style index itself.
 - `sheet.getRowStyleId()` and `setRowStyleId()` currently read and write the row-level `<row s="..." customFormat="1">` style index; that layer still does not modify `styles.xml`.

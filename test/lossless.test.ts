@@ -209,6 +209,58 @@ test("style id APIs read and write style indexes by address and indexes", async 
   assert.match(sheetXml, /<c r="C2" s="7"\/>/);
 });
 
+test("cell style patch APIs clone and apply styles without mutating shared style ids", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" s="1" t="inlineStr"><is><t>Hello</t></is></c>
+      <c r="B1" s="1" t="inlineStr"><is><t>World</t></is></c>
+    </row>
+  </sheetData>
+</worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+  const cell = sheet.cell("B1");
+
+  const a1StyleId = sheet.setStyle("A1", {
+    numFmtId: 14,
+    applyNumberFormat: true,
+    applyAlignment: true,
+    alignment: {
+      horizontal: "center",
+    },
+  });
+  const b1StyleId = cell.setStyle({
+    applyAlignment: true,
+    alignment: {
+      horizontal: "right",
+    },
+  });
+
+  assert.equal(a1StyleId, 2);
+  assert.equal(b1StyleId, 3);
+  assert.equal(sheet.getStyleId("A1"), 2);
+  assert.equal(sheet.getStyleId("B1"), 3);
+  assert.equal(workbook.getStyle(1)?.numFmtId, 0);
+  assert.equal(workbook.getStyle(1)?.alignment, null);
+  assert.equal(sheet.getStyle("A1")?.numFmtId, 14);
+  assert.equal(sheet.getStyle("A1")?.alignment?.horizontal, "center");
+  assert.equal(cell.style?.alignment?.horizontal, "right");
+
+  const stylesXml = entryText(workbook.toEntries(), "xl/styles.xml");
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+
+  assert.match(stylesXml, /<cellXfs count="4">/);
+  assert.match(sheetXml, /<c r="A1" s="2" t="inlineStr"><is><t>Hello<\/t><\/is><\/c>/);
+  assert.match(sheetXml, /<c r="B1" s="3" t="inlineStr"><is><t>World<\/t><\/is><\/c>/);
+});
+
 test("copyStyle APIs copy style indexes without changing target values", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = replaceEntryText(

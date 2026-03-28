@@ -60,6 +60,10 @@ export class Cell {
     this.sheet.setStyleId(this.address, styleId);
   }
 
+  setStyle(patch: CellStylePatch): number {
+    return this.sheet.setStyle(this.address, patch);
+  }
+
   cloneStyle(patch: CellStylePatch = {}): number {
     return this.sheet.cloneStyle(this.address, patch);
   }

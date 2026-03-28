@@ -560,6 +560,224 @@ test("table command group respects explicit data row boundaries", async () => {
   }
 });
 
+test("table command group supports profile presets for structured sheets", async () => {
+  const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-cli-test-"));
+
+  try {
+    const inputPath = await writeStructuredTableWorkbook(tempRoot);
+    const profilesPath = join(tempRoot, "table-profiles.json");
+    const upsertedPath = join(tempRoot, "profile-upsert.xlsx");
+
+    await writeFile(
+      profilesPath,
+      JSON.stringify(
+        {
+          profiles: {
+            demo: {
+              sheet: "Sheet1",
+              headerRow: 1,
+              dataStartRow: 6,
+              keyFields: ["id"],
+            },
+          },
+        },
+        null,
+        2,
+      ),
+    );
+
+    let result = await runCliCapture([
+      "table",
+      "list",
+      inputPath,
+      "--profile",
+      "demo",
+      "--profiles-file",
+      profilesPath,
+    ]);
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout).rows, [
+      { row: 6, record: { id: 1001, name: "Alpha" } },
+      { row: 7, record: { id: 1002, name: "Beta" } },
+    ]);
+
+    result = await runCliCapture([
+      "table",
+      "get",
+      inputPath,
+      "--profile",
+      "demo",
+      "--profiles-file",
+      profilesPath,
+      "--key",
+      "1002",
+    ]);
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout).row, {
+      row: 7,
+      record: { id: 1002, name: "Beta" },
+    });
+
+    result = await runCliCapture([
+      "table",
+      "upsert",
+      inputPath,
+      "--profile",
+      "demo",
+      "--profiles-file",
+      profilesPath,
+      "--record",
+      '{"id":1002,"name":"Beta-2"}',
+      "--output",
+      upsertedPath,
+    ]);
+    assert.equal(result.exitCode, 0);
+
+    const payload = JSON.parse(result.stdout);
+    assert.deepEqual(payload.keyFields, ["id"]);
+    assert.deepEqual(payload.rows, [
+      { row: 6, record: { id: 1001, name: "Alpha" } },
+      { row: 7, record: { id: 1002, name: "Beta-2" } },
+    ]);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("explicit table options override profile values", async () => {
+  const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-cli-test-"));
+
+  try {
+    const inputPath = await writeStructuredTableWorkbook(tempRoot);
+    const profilesPath = join(tempRoot, "table-profiles.json");
+
+    await writeFile(
+      profilesPath,
+      JSON.stringify(
+        {
+          profiles: {
+            demo: {
+              sheet: "Sheet1",
+              headerRow: 1,
+              dataStartRow: 7,
+              keyFields: ["id"],
+            },
+          },
+        },
+        null,
+        2,
+      ),
+    );
+
+    const result = await runCliCapture([
+      "table",
+      "list",
+      inputPath,
+      "--profile",
+      "demo",
+      "--profiles-file",
+      profilesPath,
+      "--data-start-row",
+      "6",
+    ]);
+    assert.equal(result.exitCode, 0);
+
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.dataStartRow, 6);
+    assert.deepEqual(payload.rows, [
+      { row: 6, record: { id: 1001, name: "Alpha" } },
+      { row: 7, record: { id: 1002, name: "Beta" } },
+    ]);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("table command group supports composite key profiles", async () => {
+  const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-cli-test-"));
+
+  try {
+    const inputPath = await writeCompositeStructuredTableWorkbook(tempRoot);
+    const profilesPath = join(tempRoot, "table-profiles.json");
+    const upsertedPath = join(tempRoot, "composite-profile-upsert.xlsx");
+
+    await writeFile(
+      profilesPath,
+      JSON.stringify(
+        {
+          profiles: {
+            defineLike: {
+              sheet: "Sheet1",
+              headerRow: 2,
+              dataStartRow: 7,
+              keyFields: ["key1", "key2"],
+            },
+          },
+        },
+        null,
+        2,
+      ),
+    );
+
+    let result = await runCliCapture([
+      "table",
+      "get",
+      inputPath,
+      "--profile",
+      "defineLike",
+      "--profiles-file",
+      profilesPath,
+      "--key",
+      '{"key1":"TASK_TYPE","key2":"MAIN"}',
+    ]);
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout).row, {
+      row: 7,
+      record: {
+        id: "-",
+        comment: "任务类型",
+        key1: "TASK_TYPE",
+        key2: "MAIN",
+        value_comment: "主线任务",
+        value: 1,
+        value_type: "int",
+        enum: "TaskType",
+        enum_option: "true",
+      },
+    });
+
+    result = await runCliCapture([
+      "table",
+      "upsert",
+      inputPath,
+      "--profile",
+      "defineLike",
+      "--profiles-file",
+      profilesPath,
+      "--record",
+      '{"id":"-","comment":"任务类型","key1":"TASK_TYPE","key2":"MAIN","value_comment":"主线任务-新","value":10,"value_type":"int","enum":"TaskType","enum_option":"true"}',
+      "--output",
+      upsertedPath,
+    ]);
+    assert.equal(result.exitCode, 0);
+
+    const workbook = await Workbook.open(upsertedPath);
+    assert.deepEqual(workbook.getSheet("Sheet1").getRecord(7, 2), {
+      id: "-",
+      comment: "任务类型",
+      key1: "TASK_TYPE",
+      key2: "MAIN",
+      value_comment: "主线任务-新",
+      value: 10,
+      value_type: "int",
+      enum: "TaskType",
+      enum_option: "true",
+    });
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("style commands update formatting and can copy styles through the CLI", async () => {
   const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-cli-test-"));
 
@@ -834,6 +1052,34 @@ async function writeStructuredTableWorkbook(rootDirectory: string): Promise<stri
   sheet.setRow(5, ["###", "display"]);
   sheet.setRow(6, [1001, "Alpha"]);
   sheet.setRow(7, [1002, "Beta"]);
+
+  await workbook.save(inputPath);
+  return inputPath;
+}
+
+async function writeCompositeStructuredTableWorkbook(rootDirectory: string): Promise<string> {
+  const inputPath = await writeFixtureWorkbook(rootDirectory);
+  const workbook = await Workbook.open(inputPath);
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.setRow(1, ["@define"]);
+  sheet.setRow(2, [
+    "id",
+    "comment",
+    "key1",
+    "key2",
+    "value_comment",
+    "value",
+    "value_type",
+    "enum",
+    "enum_option",
+  ]);
+  sheet.setRow(3, ["auto", "string?", "string", "string?", "string?", "@value_type", "string", "string?", "bool?"]);
+  sheet.setRow(4, [">>", "client|server", null, null, null, null, null, null, null]);
+  sheet.setRow(5, ["!!!", "x", "x", "x", "x", "x", "x", "x", "x"]);
+  sheet.setRow(6, ["###", "注释", null, null, "注释", null, null, null, null]);
+  sheet.setRow(7, ["-", "任务类型", "TASK_TYPE", "MAIN", "主线任务", 1, "int", "TaskType", "true"]);
+  sheet.setRow(8, ["-", null, "TASK_TYPE", "BRANCH", "支线任务", 2, "int", null, null]);
 
   await workbook.save(inputPath);
   return inputPath;

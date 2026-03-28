@@ -56,6 +56,12 @@ type StructuredTableRow = {
   row: number;
 };
 type ConfigTableSyncMode = "replace" | "upsert";
+interface TableProfile {
+  dataStartRow: number;
+  headerRow: number;
+  keyFields?: string[];
+  sheet: string;
+}
 
 type WorkbookOperation =
   | {
@@ -571,23 +577,28 @@ function createProgram(io: Required<CliIo>): Command {
   table
     .command("inspect")
     .argument("<file>", "input xlsx file")
-    .requiredOption("--sheet <name>", "sheet name")
-    .requiredOption("--header-row <row>", "row number containing field names", parsePositiveInteger)
-    .requiredOption("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
+    .option("--sheet <name>", "sheet name")
+    .option("--header-row <row>", "row number containing field names", parsePositiveInteger)
+    .option("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
+    .option("--profile <name>", "table profile name")
+    .option("--profiles-file <file>", "JSON file containing table profiles")
     .action(
       async (
         file: string,
         options: {
-          dataStartRow: number;
-          headerRow: number;
-          sheet: string;
+          dataStartRow?: number;
+          headerRow?: number;
+          profile?: string;
+          profilesFile?: string;
+          sheet?: string;
         },
       ) => {
+        const context = await resolveTableCommandContext(io.cwd, options);
         const result = await inspectTable(
           resolveFrom(io.cwd, file),
-          options.sheet,
-          options.headerRow,
-          options.dataStartRow,
+          context.sheet,
+          context.headerRow,
+          context.dataStartRow,
         );
         writeJson(io.stdout, result);
       },
@@ -596,23 +607,28 @@ function createProgram(io: Required<CliIo>): Command {
   table
     .command("list")
     .argument("<file>", "input xlsx file")
-    .requiredOption("--sheet <name>", "sheet name")
-    .requiredOption("--header-row <row>", "row number containing field names", parsePositiveInteger)
-    .requiredOption("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
+    .option("--sheet <name>", "sheet name")
+    .option("--header-row <row>", "row number containing field names", parsePositiveInteger)
+    .option("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
+    .option("--profile <name>", "table profile name")
+    .option("--profiles-file <file>", "JSON file containing table profiles")
     .action(
       async (
         file: string,
         options: {
-          dataStartRow: number;
-          headerRow: number;
-          sheet: string;
+          dataStartRow?: number;
+          headerRow?: number;
+          profile?: string;
+          profilesFile?: string;
+          sheet?: string;
         },
       ) => {
+        const context = await resolveTableCommandContext(io.cwd, options);
         const result = await getStructuredTableRows(
           resolveFrom(io.cwd, file),
-          options.sheet,
-          options.headerRow,
-          options.dataStartRow,
+          context.sheet,
+          context.headerRow,
+          context.dataStartRow,
         );
         writeJson(io.stdout, result);
       },
@@ -621,28 +637,33 @@ function createProgram(io: Required<CliIo>): Command {
   table
     .command("get")
     .argument("<file>", "input xlsx file")
-    .requiredOption("--sheet <name>", "sheet name")
-    .requiredOption("--header-row <row>", "row number containing field names", parsePositiveInteger)
-    .requiredOption("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
+    .option("--sheet <name>", "sheet name")
+    .option("--header-row <row>", "row number containing field names", parsePositiveInteger)
+    .option("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
     .requiredOption("--key <json>", "JSON scalar or object used to locate the row")
     .option("--key-field <name>", "key field name", collectRepeatedStrings, [])
+    .option("--profile <name>", "table profile name")
+    .option("--profiles-file <file>", "JSON file containing table profiles")
     .action(
       async (
         file: string,
         options: {
-          dataStartRow: number;
-          headerRow: number;
+          dataStartRow?: number;
+          headerRow?: number;
           key: string;
           keyField: string[];
-          sheet: string;
+          profile?: string;
+          profilesFile?: string;
+          sheet?: string;
         },
       ) => {
+        const context = await resolveTableCommandContext(io.cwd, options);
         const result = await getStructuredTableRecord(
           resolveFrom(io.cwd, file),
-          options.sheet,
-          options.headerRow,
-          options.dataStartRow,
-          options.keyField,
+          context.sheet,
+          context.headerRow,
+          context.dataStartRow,
+          context.keyFields,
           options.key,
         );
         writeJson(io.stdout, result);
@@ -652,56 +673,61 @@ function createProgram(io: Required<CliIo>): Command {
   table
     .command("upsert")
     .argument("<file>", "input xlsx file")
-    .requiredOption("--sheet <name>", "sheet name")
-    .requiredOption("--header-row <row>", "row number containing field names", parsePositiveInteger)
-    .requiredOption("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
+    .option("--sheet <name>", "sheet name")
+    .option("--header-row <row>", "row number containing field names", parsePositiveInteger)
+    .option("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
     .requiredOption("--record <json>", "JSON object keyed by field names")
     .option("--key-field <name>", "key field name", collectRepeatedStrings, [])
+    .option("--profile <name>", "table profile name")
+    .option("--profiles-file <file>", "JSON file containing table profiles")
     .option("--output <file>", "output xlsx path")
     .option("--in-place", "overwrite the input workbook")
     .action(
       async (
         file: string,
         options: {
-          dataStartRow: number;
-          headerRow: number;
+          dataStartRow?: number;
+          headerRow?: number;
           inPlace?: boolean;
           keyField: string[];
           output?: string;
+          profile?: string;
+          profilesFile?: string;
           record: string;
-          sheet: string;
+          sheet?: string;
         },
       ) => {
+        const context = await resolveTableCommandContext(io.cwd, options);
         const inputPath = resolveFrom(io.cwd, file);
         const outputPath = resolveOutputPath(inputPath, {
           inPlace: options.inPlace === true,
           output: options.output ? resolveFrom(io.cwd, options.output) : undefined,
         });
         const workbook = await Workbook.open(inputPath);
-        const sheet = workbook.getSheet(options.sheet);
+        const sheet = workbook.getSheet(context.sheet);
         const record = parseJsonCellRecord(options.record, "--record");
-        const keyFields = resolveTableKeyFields(sheet, options.headerRow, options.keyField);
+        const keyFields = resolveTableKeyFields(sheet, context.headerRow, context.keyFields);
         const keyRecord = pickKeyRecord(record, keyFields);
         const matchedRow =
-          findStructuredTableRow(sheet, options.headerRow, options.dataStartRow, keyFields, keyRecord)?.row ?? null;
+          findStructuredTableRow(sheet, context.headerRow, context.dataStartRow, keyFields, keyRecord)?.row ?? null;
 
         if (matchedRow === null) {
-          sheet.addRecord(record, options.headerRow);
+          sheet.addRecord(record, context.headerRow);
         } else {
-          writeStructuredTableRecord(sheet, options.headerRow, matchedRow, record);
+          writeStructuredTableRecord(sheet, context.headerRow, matchedRow, record);
         }
 
         await workbook.save(outputPath);
         writeJson(io.stdout, {
           action: "table.upsert",
-          dataStartRow: options.dataStartRow,
-          headerRow: options.headerRow,
+          dataStartRow: context.dataStartRow,
+          headerRow: context.headerRow,
           input: inputPath,
           keyFields,
           output: outputPath,
           record,
-          rows: (await getStructuredTableRows(outputPath, options.sheet, options.headerRow, options.dataStartRow)).rows,
-          sheet: options.sheet,
+          rows: (await getStructuredTableRows(outputPath, context.sheet, context.headerRow, context.dataStartRow)).rows,
+          sheet: context.sheet,
         });
       },
     );
@@ -709,55 +735,60 @@ function createProgram(io: Required<CliIo>): Command {
   table
     .command("delete")
     .argument("<file>", "input xlsx file")
-    .requiredOption("--sheet <name>", "sheet name")
-    .requiredOption("--header-row <row>", "row number containing field names", parsePositiveInteger)
-    .requiredOption("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
+    .option("--sheet <name>", "sheet name")
+    .option("--header-row <row>", "row number containing field names", parsePositiveInteger)
+    .option("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
     .requiredOption("--key <json>", "JSON scalar or object used to locate the row")
     .option("--key-field <name>", "key field name", collectRepeatedStrings, [])
+    .option("--profile <name>", "table profile name")
+    .option("--profiles-file <file>", "JSON file containing table profiles")
     .option("--output <file>", "output xlsx path")
     .option("--in-place", "overwrite the input workbook")
     .action(
       async (
         file: string,
         options: {
-          dataStartRow: number;
-          headerRow: number;
+          dataStartRow?: number;
+          headerRow?: number;
           inPlace?: boolean;
           key: string;
           keyField: string[];
           output?: string;
-          sheet: string;
+          profile?: string;
+          profilesFile?: string;
+          sheet?: string;
         },
       ) => {
+        const context = await resolveTableCommandContext(io.cwd, options);
         const inputPath = resolveFrom(io.cwd, file);
         const outputPath = resolveOutputPath(inputPath, {
           inPlace: options.inPlace === true,
           output: options.output ? resolveFrom(io.cwd, options.output) : undefined,
         });
         const workbook = await Workbook.open(inputPath);
-        const sheet = workbook.getSheet(options.sheet);
-        const keyFields = resolveTableKeyFields(sheet, options.headerRow, options.keyField);
+        const sheet = workbook.getSheet(context.sheet);
+        const keyFields = resolveTableKeyFields(sheet, context.headerRow, context.keyFields);
         const keyRecord = parseTableKey(options.key, keyFields, "--key");
         const row =
-          findStructuredTableRow(sheet, options.headerRow, options.dataStartRow, keyFields, keyRecord)?.row ?? null;
+          findStructuredTableRow(sheet, context.headerRow, context.dataStartRow, keyFields, keyRecord)?.row ?? null;
 
         if (row !== null) {
-          sheet.deleteRecord(row, options.headerRow);
+          sheet.deleteRecord(row, context.headerRow);
         }
 
         await workbook.save(outputPath);
         writeJson(io.stdout, {
           action: "table.delete",
-          dataStartRow: options.dataStartRow,
+          dataStartRow: context.dataStartRow,
           deleted: row !== null,
-          headerRow: options.headerRow,
+          headerRow: context.headerRow,
           input: inputPath,
           key: keyRecord,
           keyFields,
           output: outputPath,
           row,
-          rows: (await getStructuredTableRows(outputPath, options.sheet, options.headerRow, options.dataStartRow)).rows,
-          sheet: options.sheet,
+          rows: (await getStructuredTableRows(outputPath, context.sheet, context.headerRow, context.dataStartRow)).rows,
+          sheet: context.sheet,
         });
       },
     );
@@ -765,11 +796,13 @@ function createProgram(io: Required<CliIo>): Command {
   table
     .command("sync")
     .argument("<file>", "input xlsx file")
-    .requiredOption("--sheet <name>", "sheet name")
-    .requiredOption("--header-row <row>", "row number containing field names", parsePositiveInteger)
-    .requiredOption("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
+    .option("--sheet <name>", "sheet name")
+    .option("--header-row <row>", "row number containing field names", parsePositiveInteger)
+    .option("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
     .requiredOption("--from-json <file>", "JSON file containing records or a config object")
     .option("--key-field <name>", "key field name", collectRepeatedStrings, [])
+    .option("--profile <name>", "table profile name")
+    .option("--profiles-file <file>", "JSON file containing table profiles")
     .option("--value-field <name>", "field name used when normalizing scalar config objects", "Value")
     .option("--headers <json>", "JSON array of header strings")
     .option("--mode <mode>", "sync mode: replace or upsert", parseConfigTableSyncMode, "replace")
@@ -779,18 +812,21 @@ function createProgram(io: Required<CliIo>): Command {
       async (
         file: string,
         options: {
-          dataStartRow: number;
+          dataStartRow?: number;
           fromJson: string;
-          headerRow: number;
+          headerRow?: number;
           headers?: string;
           inPlace?: boolean;
           keyField: string[];
           mode: ConfigTableSyncMode;
           output?: string;
-          sheet: string;
+          profile?: string;
+          profilesFile?: string;
+          sheet?: string;
           valueField: string;
         },
       ) => {
+        const context = await resolveTableCommandContext(io.cwd, options);
         const inputPath = resolveFrom(io.cwd, file);
         const jsonPath = resolveFrom(io.cwd, options.fromJson);
         const outputPath = resolveOutputPath(inputPath, {
@@ -798,37 +834,37 @@ function createProgram(io: Required<CliIo>): Command {
           output: options.output ? resolveFrom(io.cwd, options.output) : undefined,
         });
         const workbook = await Workbook.open(inputPath);
-        const sheet = workbook.getSheet(options.sheet);
+        const sheet = workbook.getSheet(context.sheet);
         const syncInput = await readConfigTableSyncInput(
           jsonPath,
-          options.keyField[0] ?? "Key",
+          context.keyFields[0] ?? "Key",
           options.valueField,
         );
         const explicitHeaders =
           options.headers === undefined ? undefined : parseJsonStringArray(options.headers, "--headers");
         const headers = resolveConfigTableHeaders(
           sheet,
-          options.headerRow,
+          context.headerRow,
           explicitHeaders ?? syncInput.headers,
           syncInput.records,
         );
 
-        sheet.setHeaders(headers, options.headerRow);
+        sheet.setHeaders(headers, context.headerRow);
 
         if (options.mode === "replace") {
-          writeStructuredTableRecords(sheet, options.headerRow, options.dataStartRow, syncInput.records);
+          writeStructuredTableRecords(sheet, context.headerRow, context.dataStartRow, syncInput.records);
         } else {
-          const keyFields = resolveTableKeyFields(sheet, options.headerRow, options.keyField);
+          const keyFields = resolveTableKeyFields(sheet, context.headerRow, context.keyFields);
           for (const record of syncInput.records) {
             const keyRecord = pickKeyRecord(record, keyFields);
             const matchedRow =
-              findStructuredTableRow(sheet, options.headerRow, options.dataStartRow, keyFields, keyRecord)?.row ??
+              findStructuredTableRow(sheet, context.headerRow, context.dataStartRow, keyFields, keyRecord)?.row ??
               null;
 
             if (matchedRow === null) {
-              sheet.addRecord(record, options.headerRow);
+              sheet.addRecord(record, context.headerRow);
             } else {
-              writeStructuredTableRecord(sheet, options.headerRow, matchedRow, record);
+              writeStructuredTableRecord(sheet, context.headerRow, matchedRow, record);
             }
           }
         }
@@ -836,13 +872,13 @@ function createProgram(io: Required<CliIo>): Command {
         await workbook.save(outputPath);
         writeJson(io.stdout, {
           action: "table.sync",
-          dataStartRow: options.dataStartRow,
-          headerRow: options.headerRow,
+          dataStartRow: context.dataStartRow,
+          headerRow: context.headerRow,
           input: inputPath,
           mode: options.mode,
           output: outputPath,
-          rows: (await getStructuredTableRows(outputPath, options.sheet, options.headerRow, options.dataStartRow)).rows,
-          sheet: options.sheet,
+          rows: (await getStructuredTableRows(outputPath, context.sheet, context.headerRow, context.dataStartRow)).rows,
+          sheet: context.sheet,
           source: jsonPath,
         });
       },
@@ -1630,6 +1666,79 @@ async function readConfigTableSyncInput(
 
   return {
     records: normalizeConfigObjectToRecords(record, filePath, field, valueField),
+  };
+}
+
+async function readTableProfiles(filePath: string): Promise<Record<string, TableProfile>> {
+  const parsed = parseJsonDocument(await readFile(filePath, "utf8"), filePath);
+  const root = assertRecord(parsed, filePath);
+  const profiles = assertRecord(root.profiles, `${filePath}.profiles`);
+  const next: Record<string, TableProfile> = {};
+
+  for (const [name, rawProfile] of Object.entries(profiles)) {
+    const profile = assertRecord(rawProfile, `${filePath}.profiles.${name}`);
+    next[name] = {
+      dataStartRow: assertPositiveInteger(profile.dataStartRow, `${filePath}.profiles.${name}.dataStartRow`),
+      headerRow: assertPositiveInteger(profile.headerRow, `${filePath}.profiles.${name}.headerRow`),
+      keyFields:
+        profile.keyFields === undefined
+          ? undefined
+          : assertStringArray(profile.keyFields, `${filePath}.profiles.${name}.keyFields`),
+      sheet: assertString(profile.sheet, `${filePath}.profiles.${name}.sheet`),
+    };
+  }
+
+  return next;
+}
+
+async function resolveTableCommandContext(
+  cwd: string,
+  options: {
+    dataStartRow?: number;
+    headerRow?: number;
+    keyField?: string[];
+    profile?: string;
+    profilesFile?: string;
+    sheet?: string;
+  },
+): Promise<{
+  dataStartRow: number;
+  headerRow: number;
+  keyFields: string[];
+  sheet: string;
+}> {
+  let profile: TableProfile | undefined;
+
+  if (options.profile) {
+    const profilesPath = resolveFrom(cwd, options.profilesFile ?? "table-profiles.json");
+    const profiles = await readTableProfiles(profilesPath);
+    profile = profiles[options.profile];
+    if (!profile) {
+      throw new Error(`Table profile not found: ${options.profile}`);
+    }
+  }
+
+  const sheet = options.sheet ?? profile?.sheet;
+  const headerRow = options.headerRow ?? profile?.headerRow;
+  const dataStartRow = options.dataStartRow ?? profile?.dataStartRow;
+
+  if (!sheet) {
+    throw new Error("Missing sheet; pass --sheet or use --profile");
+  }
+
+  if (headerRow === undefined) {
+    throw new Error("Missing header row; pass --header-row or use --profile");
+  }
+
+  if (dataStartRow === undefined) {
+    throw new Error("Missing data start row; pass --data-start-row or use --profile");
+  }
+
+  return {
+    dataStartRow,
+    headerRow,
+    keyFields: options.keyField?.length ? options.keyField : (profile?.keyFields ?? []),
+    sheet,
   };
 }
 

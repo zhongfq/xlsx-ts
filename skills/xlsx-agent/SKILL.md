@@ -107,7 +107,20 @@ Use validation whenever the user cares about style preservation, untouched workb
 
 When a sheet has explicit header rows, metadata rows, and a later data section, prefer the `table` command group.
 
+If the repository already provides a `table-profiles.json`, prefer `--profile` over repeating row-boundary arguments on every call.
+
 Examples:
+
+```bash
+npm run cli -- table list res/task.xlsx --profile task-main
+npm run cli -- table get res/task.xlsx --profile task-main --key 1001
+npm run cli -- table upsert res/task.xlsx --profile task-main --record '{"id":1001,"desc":"主线任务1-已更新"}' --in-place
+npm run cli -- table get res/task.xlsx --profile task-conf --key '"GATE_SIEGE_TIME"'
+npm run cli -- table upsert res/task.xlsx --profile task-conf --record '{"id":"-","key":"GATE_SIEGE_TIME","value":1200,"value_type":"int","value_comment":"攻城时长(秒数）"}' --in-place
+npm run cli -- table get res/task.xlsx --profile task-define --key '{"key1":"TASK_TYPE","key2":"MAIN"}'
+```
+
+Fall back to explicit structure arguments when no profile exists yet:
 
 ```bash
 npm run cli -- table inspect path/to/file.xlsx --sheet main --header-row 1 --data-start-row 6
@@ -118,6 +131,14 @@ npm run cli -- table sync path/to/file.xlsx --sheet main --header-row 1 --data-s
 ```
 
 Use this command group when rows between the header row and data rows must be preserved as-is.
+
+Treat rows such as `auto`, `>>`, `!!!`, `###`, and `-` as workbook structure that must be preserved, not as built-in business semantics. Profiles should only describe sheet name, header row, data start row, and key fields.
+
+Explicit flags should win over profile defaults. For example:
+
+```bash
+npm run cli -- table list path/to/file.xlsx --profile task-main --data-start-row 7
+```
 
 ## Use The Record Commands For Config Tables
 

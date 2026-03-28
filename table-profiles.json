@@ -1,0 +1,46 @@
+{
+  "profiles": {
+    "task-main": {
+      "sheet": "main",
+      "headerRow": 1,
+      "dataStartRow": 6,
+      "keyFields": ["id"]
+    },
+    "task-branch": {
+      "sheet": "branch",
+      "headerRow": 1,
+      "dataStartRow": 6,
+      "keyFields": ["id"]
+    },
+    "task-weekly": {
+      "sheet": "weekly",
+      "headerRow": 1,
+      "dataStartRow": 6,
+      "keyFields": ["id"]
+    },
+    "task-events": {
+      "sheet": "events",
+      "headerRow": 1,
+      "dataStartRow": 6,
+      "keyFields": ["id"]
+    },
+    "task-exchange": {
+      "sheet": "exchange",
+      "headerRow": 1,
+      "dataStartRow": 6,
+      "keyFields": ["id"]
+    },
+    "task-conf": {
+      "sheet": "conf",
+      "headerRow": 2,
+      "dataStartRow": 7,
+      "keyFields": ["key"]
+    },
+    "task-define": {
+      "sheet": "define",
+      "headerRow": 2,
+      "dataStartRow": 7,
+      "keyFields": ["key1", "key2"]
+    }
+  }
+}

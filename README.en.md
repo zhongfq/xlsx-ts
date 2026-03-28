@@ -60,6 +60,9 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `workbook.getSheets()`
 - `workbook.getSheet(name)`
 - `workbook.getActiveSheet()`
+- `workbook.getFont(fontId)`
+- `workbook.updateFont(fontId, patch)`
+- `workbook.cloneFont(fontId, patch?)`
 - `workbook.getStyle(styleId)`
 - `workbook.updateStyle(styleId, patch)`
 - `workbook.cloneStyle(styleId, patch?)`
@@ -79,6 +82,8 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `sheet.rename(name)`
 - `sheet.getCell(address)`
 - `sheet.getCell(rowNumber, column)`
+- `sheet.getFont(address)`
+- `sheet.getFont(rowNumber, column)`
 - `sheet.getStyleId(address)`
 - `sheet.getStyleId(rowNumber, column)`
 - `sheet.getStyle(address)`
@@ -89,6 +94,8 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `sheet.getColumnStyle(column)`
 - `sheet.copyStyle(sourceAddress, targetAddress)`
 - `sheet.copyStyle(sourceRowNumber, sourceColumn, targetRowNumber, targetColumn)`
+- `sheet.setFont(address, patch)`
+- `sheet.setFont(rowNumber, column, patch)`
 - `sheet.setStyle(address, patch)`
 - `sheet.setStyle(rowNumber, column, patch)`
 - `sheet.cloneStyle(address, patch?)`
@@ -246,13 +253,16 @@ await workbook.save("output.xlsx");
 Notes:
 
 - On first read/write access, a sheet scans `sheetData` once and builds indexes for rows and cells.
-- `sheet.cell(address)` returns a reusable `Cell` handle whose parsed value/formula/style-index state is cached by sheet revision. It now also exposes `cell.style`, `cell.setStyle(patch)`, and `cell.cloneStyle(patch?)`.
+- `sheet.cell(address)` returns a reusable `Cell` handle whose parsed value/formula/style-index state is cached by sheet revision. It now also exposes `cell.style`, `cell.font`, `cell.setStyle(patch)`, `cell.setFont(patch)`, and `cell.cloneStyle(patch?)`.
 - `sheet.cell()`, `getCell()`, `setCell()`, `getFormula()`, and `setFormula()` now support both `A1` addresses and `(rowNumber, column)` calls. Row and column indexes are 1-based.
 - Later `getCell()` and `getFormula()` calls use those indexes directly instead of running a full string match on every read.
 - `sheet.rowCount` and `sheet.columnCount` currently mean the maximum used row number and maximum used column number. Empty sheets return `0`.
 - `sheet.getCellEntries()`, `iterCellEntries()`, `getRowEntries()`, and `getColumnEntries()` expose the real worksheet `<c>` nodes with address, row/column indexes, type, style id, and value, which is useful for large or sparse sheet iteration.
 - `sheet.deleteCell()` removes the worksheet `<c>` node entirely; if you want to keep a styled placeholder but clear the value, continue using `setCell(..., null)`.
 - `workbook.getStyle()` reads `cellXfs` definitions from `styles.xml`, `workbook.updateStyle()` patches an existing `<xf>` in place, and `workbook.cloneStyle()` appends a new `<xf>` derived from an existing one and returns the new style id.
+- `workbook.getFont()`, `updateFont()`, and `cloneFont()` work directly on the `<fonts>` section in `styles.xml`, which is useful when you want to manage reusable `fontId` values explicitly.
+- `sheet.getFont()` resolves the font definition currently used by the cell.
+- `sheet.setFont()` and `cell.setFont()` clone the current `fontId`, then clone the current `styleId` with that new font attached, so only the targeted cell changes and other cells sharing the old font/style stay untouched.
 - `sheet.getStyle()` resolves the cell's current style definition; when the cell has no explicit `s="..."`, it falls back to the default style `0`.
 - `sheet.setStyle()` clones the current cell style into a new `styleId`, writes that new definition into `styles.xml`, and applies it back to the same cell so other cells sharing the old style id stay untouched.
 - `sheet.cloneStyle()` clones the current cell style, writes the new definition into `styles.xml`, applies it back to the same cell, and supports both `A1` and `(rowNumber, column)` calls.

@@ -80,6 +80,58 @@ export interface CellStylePatch {
   alignment?: CellStyleAlignmentPatch | null;
 }
 
+export interface CellFontColor {
+  rgb?: string;
+  theme?: number;
+  indexed?: number;
+  auto?: boolean;
+  tint?: number;
+}
+
+export interface CellFontColorPatch {
+  rgb?: string | null;
+  theme?: number | null;
+  indexed?: number | null;
+  auto?: boolean | null;
+  tint?: number | null;
+}
+
+export interface CellFontDefinition {
+  bold: boolean | null;
+  italic: boolean | null;
+  underline: string | null;
+  strike: boolean | null;
+  outline: boolean | null;
+  shadow: boolean | null;
+  condense: boolean | null;
+  extend: boolean | null;
+  size: number | null;
+  name: string | null;
+  family: number | null;
+  charset: number | null;
+  scheme: string | null;
+  vertAlign: string | null;
+  color: CellFontColor | null;
+}
+
+export interface CellFontPatch {
+  bold?: boolean | null;
+  italic?: boolean | null;
+  underline?: string | null;
+  strike?: boolean | null;
+  outline?: boolean | null;
+  shadow?: boolean | null;
+  condense?: boolean | null;
+  extend?: boolean | null;
+  size?: number | null;
+  name?: string | null;
+  family?: number | null;
+  charset?: number | null;
+  scheme?: string | null;
+  vertAlign?: string | null;
+  color?: CellFontColorPatch | null;
+}
+
 export interface DefinedName {
   hidden: boolean;
   name: string;

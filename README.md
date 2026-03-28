@@ -55,6 +55,9 @@
 - `workbook.getSheets()`
 - `workbook.getSheet(name)`
 - `workbook.getActiveSheet()`
+- `workbook.getFont(fontId)`
+- `workbook.updateFont(fontId, patch)`
+- `workbook.cloneFont(fontId, patch?)`
 - `workbook.getStyle(styleId)`
 - `workbook.updateStyle(styleId, patch)`
 - `workbook.cloneStyle(styleId, patch?)`
@@ -74,6 +77,8 @@
 - `sheet.rename(name)`
 - `sheet.getCell(address)`
 - `sheet.getCell(rowNumber, column)`
+- `sheet.getFont(address)`
+- `sheet.getFont(rowNumber, column)`
 - `sheet.getStyleId(address)`
 - `sheet.getStyleId(rowNumber, column)`
 - `sheet.getStyle(address)`
@@ -84,6 +89,8 @@
 - `sheet.getColumnStyle(column)`
 - `sheet.copyStyle(sourceAddress, targetAddress)`
 - `sheet.copyStyle(sourceRowNumber, sourceColumn, targetRowNumber, targetColumn)`
+- `sheet.setFont(address, patch)`
+- `sheet.setFont(rowNumber, column, patch)`
 - `sheet.setStyle(address, patch)`
 - `sheet.setStyle(rowNumber, column, patch)`
 - `sheet.cloneStyle(address, patch?)`
@@ -241,13 +248,16 @@ await workbook.save("output.xlsx");
 说明：
 
 - 同一张工作表首次读写时会扫描一次 `sheetData`，建立单元格与行的位置索引
-- `sheet.cell(address)` 返回可复用的 `Cell` 句柄，值/公式/样式索引会按工作表 revision 缓存；现在也可以通过 `cell.style` 读取当前样式定义，并用 `cell.setStyle(patch)` / `cell.cloneStyle(patch?)` 直接派生并应用新样式
+- `sheet.cell(address)` 返回可复用的 `Cell` 句柄，值/公式/样式索引会按工作表 revision 缓存；现在也可以通过 `cell.style` / `cell.font` 读取当前样式与字体定义，并用 `cell.setStyle(patch)` / `cell.setFont(patch)` / `cell.cloneStyle(patch?)` 直接派生并应用新样式
 - `sheet.cell()` / `getCell()` / `setCell()` / `getFormula()` / `setFormula()` 现在同时支持 `A1` 地址和 `(rowNumber, column)` 两种调用方式；行列索引是从 `1` 开始
 - 后续 `getCell` / `getFormula` 会直接走索引查找，不再每次整张表做字符串匹配
 - `sheet.rowCount` / `sheet.columnCount` 当前表示已用区域的最大行号 / 最大列号；空表返回 `0`
 - `sheet.getCellEntries()` / `iterCellEntries()` / `getRowEntries()` / `getColumnEntries()` 会按 worksheet 中真实存在的 `<c>` 节点返回带地址、行列号、类型、样式索引和值的对象，适合大表和稀疏表遍历
 - `sheet.deleteCell()` 会真正移除 worksheet 里的 `<c>` 节点；如果你只是想保留样式占位但把值清空，继续用 `setCell(..., null)`
 - `workbook.getStyle()` 会读取 `styles.xml` 里的 `cellXfs` 样式定义；`workbook.updateStyle()` 会原位修改已有 `xf`；`workbook.cloneStyle()` 会基于已有 `xf` 追加一个新样式，并返回新的 `styleId`
+- `workbook.getFont()` / `updateFont()` / `cloneFont()` 会直接操作 `styles.xml` 里的 `<fonts>`；适合你想复用或维护 `fontId` 时使用
+- `sheet.getFont()` 会解析当前单元格最终引用到的字体定义
+- `sheet.setFont()` / `cell.setFont()` 会先 clone 当前 `fontId`，再 clone 当前 `styleId` 并把新 `fontId` 套上去，所以只会影响当前单元格，不会污染其它共用旧字体或旧样式的单元格
 - `sheet.getStyle()` 会按单元格当前的 `styleId` 读取样式定义；如果单元格本身没有 `s="..."`，会回退到默认样式 `0`
 - `sheet.setStyle()` 会基于当前单元格样式克隆出一个新的 `styleId`，写回 `styles.xml`，并把新样式应用到该单元格；这样不会连带修改其它共用旧 `styleId` 的单元格
 - `sheet.cloneStyle()` 会基于当前单元格样式克隆出一个新的 `styleId`，写回 `styles.xml`，并把新样式直接应用到该单元格；同样支持 `A1` 和 `(rowNumber, column)`

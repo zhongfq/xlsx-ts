@@ -261,6 +261,183 @@ test("cell style patch APIs clone and apply styles without mutating shared style
   assert.match(sheetXml, /<c r="B1" s="3" t="inlineStr"><is><t>World<\/t><\/is><\/c>/);
 });
 
+test("font definition APIs read, clone, and update workbook fonts", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = await loadFixtureEntries(fixtureDir);
+  const workbook = Workbook.fromEntries(entries);
+
+  assert.deepEqual(workbook.getFont(0), {
+    bold: null,
+    italic: null,
+    underline: null,
+    strike: null,
+    outline: null,
+    shadow: null,
+    condense: null,
+    extend: null,
+    size: 11,
+    name: "Calibri",
+    family: 2,
+    charset: null,
+    scheme: null,
+    vertAlign: null,
+    color: null,
+  });
+  assert.deepEqual(workbook.getFont(1), {
+    bold: true,
+    italic: null,
+    underline: null,
+    strike: null,
+    outline: null,
+    shadow: null,
+    condense: null,
+    extend: null,
+    size: 11,
+    name: "Calibri",
+    family: 2,
+    charset: null,
+    scheme: null,
+    vertAlign: null,
+    color: null,
+  });
+
+  const nextFontId = workbook.cloneFont(1, {
+    italic: true,
+    color: {
+      rgb: "FFFF0000",
+    },
+  });
+  workbook.updateFont(0, {
+    name: "Arial",
+    size: 12,
+  });
+
+  assert.equal(nextFontId, 2);
+  assert.deepEqual(workbook.getFont(0), {
+    bold: null,
+    italic: null,
+    underline: null,
+    strike: null,
+    outline: null,
+    shadow: null,
+    condense: null,
+    extend: null,
+    size: 12,
+    name: "Arial",
+    family: 2,
+    charset: null,
+    scheme: null,
+    vertAlign: null,
+    color: null,
+  });
+  assert.deepEqual(workbook.getFont(2), {
+    bold: true,
+    italic: true,
+    underline: null,
+    strike: null,
+    outline: null,
+    shadow: null,
+    condense: null,
+    extend: null,
+    size: 11,
+    name: "Calibri",
+    family: 2,
+    charset: null,
+    scheme: null,
+    vertAlign: null,
+    color: {
+      rgb: "FFFF0000",
+    },
+  });
+
+  const stylesXml = entryText(workbook.toEntries(), "xl/styles.xml");
+  assert.match(stylesXml, /<fonts count="3">/);
+  assert.match(stylesXml, /<font><sz val="12"\/><name val="Arial"\/><family val="2"\/><\/font>/);
+  assert.match(stylesXml, /<font><b\/><i\/><color rgb="FFFF0000"\/><sz val="11"\/><name val="Calibri"\/><family val="2"\/><\/font>/);
+});
+
+test("cell font APIs clone and apply fonts without mutating shared font ids", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" s="1" t="inlineStr"><is><t>Hello</t></is></c>
+      <c r="B1" s="1" t="inlineStr"><is><t>World</t></is></c>
+    </row>
+  </sheetData>
+</worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+  const cell = sheet.cell("B1");
+
+  assert.equal(sheet.getFont("A1")?.bold, true);
+  assert.equal(cell.font?.bold, true);
+
+  const a1FontId = sheet.setFont("A1", {
+    italic: true,
+    color: {
+      rgb: "FFFF0000",
+    },
+  });
+  const b1FontId = cell.setFont({
+    bold: null,
+    name: "Arial",
+    size: 12,
+  });
+
+  assert.equal(a1FontId, 2);
+  assert.equal(b1FontId, 3);
+  assert.equal(workbook.getFont(1)?.bold, true);
+  assert.equal(workbook.getFont(1)?.italic, null);
+  assert.deepEqual(sheet.getFont("A1"), {
+    bold: true,
+    italic: true,
+    underline: null,
+    strike: null,
+    outline: null,
+    shadow: null,
+    condense: null,
+    extend: null,
+    size: 11,
+    name: "Calibri",
+    family: 2,
+    charset: null,
+    scheme: null,
+    vertAlign: null,
+    color: {
+      rgb: "FFFF0000",
+    },
+  });
+  assert.deepEqual(cell.font, {
+    bold: null,
+    italic: null,
+    underline: null,
+    strike: null,
+    outline: null,
+    shadow: null,
+    condense: null,
+    extend: null,
+    size: 12,
+    name: "Arial",
+    family: 2,
+    charset: null,
+    scheme: null,
+    vertAlign: null,
+    color: null,
+  });
+
+  const stylesXml = entryText(workbook.toEntries(), "xl/styles.xml");
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.match(stylesXml, /<fonts count="4">/);
+  assert.match(sheetXml, /<c r="A1" s="2" t="inlineStr"><is><t>Hello<\/t><\/is><\/c>/);
+  assert.match(sheetXml, /<c r="B1" s="3" t="inlineStr"><is><t>World<\/t><\/is><\/c>/);
+});
+
 test("copyStyle APIs copy style indexes without changing target values", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = replaceEntryText(

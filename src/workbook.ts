@@ -1,5 +1,9 @@
 import type {
   ArchiveEntry,
+  CellFontColor,
+  CellFontColorPatch,
+  CellFontDefinition,
+  CellFontPatch,
   CellStyleAlignment,
   CellStyleAlignmentPatch,
   CellStyleDefinition,
@@ -44,8 +48,14 @@ interface ParsedCellStyle {
   extraChildrenXml: string;
 }
 
+interface ParsedFont {
+  definition: CellFontDefinition;
+  extraChildrenXml: string;
+}
+
 interface StylesCache {
   cellXfs: ParsedCellStyle[];
+  fonts: ParsedFont[];
   path: string;
   xml: string;
 }
@@ -106,6 +116,53 @@ export class Workbook {
   getStyle(styleId: number): CellStyleDefinition | null {
     assertStyleId(styleId);
     return cloneCellStyleDefinition(this.getStylesCache()?.cellXfs[styleId]?.definition ?? null);
+  }
+
+  getFont(fontId: number): CellFontDefinition | null {
+    assertStyleId(fontId);
+    return cloneCellFontDefinition(this.getStylesCache()?.fonts[fontId]?.definition ?? null);
+  }
+
+  updateFont(fontId: number, patch: CellFontPatch): void {
+    assertStyleId(fontId);
+    assertCellFontPatch(patch);
+
+    const styles = this.getStylesCache();
+    if (!styles) {
+      throw new XlsxError("Workbook styles.xml not found");
+    }
+
+    const sourceFont = styles.fonts[fontId];
+    if (!sourceFont) {
+      throw new XlsxError(`Font not found: ${fontId}`);
+    }
+
+    this.writeEntryText(
+      styles.path,
+      replaceFontInStylesXml(styles.xml, fontId, buildPatchedFontXml(sourceFont, patch)),
+    );
+  }
+
+  cloneFont(fontId: number, patch: CellFontPatch = {}): number {
+    assertStyleId(fontId);
+    assertCellFontPatch(patch);
+
+    const styles = this.getStylesCache();
+    if (!styles) {
+      throw new XlsxError("Workbook styles.xml not found");
+    }
+
+    const sourceFont = styles.fonts[fontId];
+    if (!sourceFont) {
+      throw new XlsxError(`Font not found: ${fontId}`);
+    }
+
+    const nextFontId = styles.fonts.length;
+    this.writeEntryText(
+      styles.path,
+      appendFontToStylesXml(styles.xml, buildPatchedFontXml(sourceFont, patch)),
+    );
+    return nextFontId;
   }
 
   updateStyle(styleId: number, patch: CellStylePatch): void {
@@ -688,7 +745,11 @@ export class Workbook {
 }
 
 function parseStylesXml(path: string, xml: string): StylesCache {
+  const fontsMatch = xml.match(/<fonts\b([^>]*)>([\s\S]*?)<\/fonts>/);
   const cellXfsMatch = xml.match(/<cellXfs\b([^>]*)>([\s\S]*?)<\/cellXfs>/);
+  if (!fontsMatch) {
+    throw new XlsxError("styles.xml is missing <fonts>");
+  }
   if (!cellXfsMatch) {
     throw new XlsxError("styles.xml is missing <cellXfs>");
   }
@@ -696,9 +757,79 @@ function parseStylesXml(path: string, xml: string): StylesCache {
   return {
     path,
     xml,
+    fonts: Array.from(fontsMatch[2].matchAll(/<font\b[^>]*?>([\s\S]*?)<\/font>|<font\b[^>]*?\/>/g), (match) =>
+      parseFont(match[0]),
+    ),
     cellXfs: Array.from(cellXfsMatch[2].matchAll(/<xf\b([^>]*?)(?:\/>|>([\s\S]*?)<\/xf>)/g), (match) =>
       parseCellStyle(match[1], match[2] ?? ""),
     ),
+  };
+}
+
+function parseFont(fontXml: string): ParsedFont {
+  if (/^<font\b[^>]*\/>$/.test(fontXml)) {
+    return {
+      definition: buildEmptyFontDefinition(),
+      extraChildrenXml: "",
+    };
+  }
+
+  const innerXml = fontXml.match(/<font\b[^>]*>([\s\S]*?)<\/font>/)?.[1] ?? "";
+  let remainingXml = innerXml;
+
+  const [boldXml, remainingAfterBold] = takeFirstTag(remainingXml, /<b\b[^>]*?(?:\/>|>[\s\S]*?<\/b>)/);
+  remainingXml = remainingAfterBold;
+  const [italicXml, remainingAfterItalic] = takeFirstTag(remainingXml, /<i\b[^>]*?(?:\/>|>[\s\S]*?<\/i>)/);
+  remainingXml = remainingAfterItalic;
+  const [underlineXml, remainingAfterUnderline] = takeFirstTag(remainingXml, /<u\b([^>]*?)(?:\/>|>[\s\S]*?<\/u>)/);
+  remainingXml = remainingAfterUnderline;
+  const [strikeXml, remainingAfterStrike] = takeFirstTag(remainingXml, /<strike\b[^>]*?(?:\/>|>[\s\S]*?<\/strike>)/);
+  remainingXml = remainingAfterStrike;
+  const [outlineXml, remainingAfterOutline] = takeFirstTag(remainingXml, /<outline\b[^>]*?(?:\/>|>[\s\S]*?<\/outline>)/);
+  remainingXml = remainingAfterOutline;
+  const [shadowXml, remainingAfterShadow] = takeFirstTag(remainingXml, /<shadow\b[^>]*?(?:\/>|>[\s\S]*?<\/shadow>)/);
+  remainingXml = remainingAfterShadow;
+  const [condenseXml, remainingAfterCondense] = takeFirstTag(remainingXml, /<condense\b[^>]*?(?:\/>|>[\s\S]*?<\/condense>)/);
+  remainingXml = remainingAfterCondense;
+  const [extendXml, remainingAfterExtend] = takeFirstTag(remainingXml, /<extend\b[^>]*?(?:\/>|>[\s\S]*?<\/extend>)/);
+  remainingXml = remainingAfterExtend;
+  const [colorXml, remainingAfterColor] = takeFirstTag(remainingXml, /<color\b([^>]*?)(?:\/>|>[\s\S]*?<\/color>)/);
+  remainingXml = remainingAfterColor;
+  const [sizeXml, remainingAfterSize] = takeFirstTag(remainingXml, /<sz\b([^>]*?)(?:\/>|>[\s\S]*?<\/sz>)/);
+  remainingXml = remainingAfterSize;
+  const [nameXml, remainingAfterName] = takeFirstTag(remainingXml, /<name\b([^>]*?)(?:\/>|>[\s\S]*?<\/name>)/);
+  remainingXml = remainingAfterName;
+  const [familyXml, remainingAfterFamily] = takeFirstTag(remainingXml, /<family\b([^>]*?)(?:\/>|>[\s\S]*?<\/family>)/);
+  remainingXml = remainingAfterFamily;
+  const [charsetXml, remainingAfterCharset] = takeFirstTag(remainingXml, /<charset\b([^>]*?)(?:\/>|>[\s\S]*?<\/charset>)/);
+  remainingXml = remainingAfterCharset;
+  const [schemeXml, remainingAfterScheme] = takeFirstTag(remainingXml, /<scheme\b([^>]*?)(?:\/>|>[\s\S]*?<\/scheme>)/);
+  remainingXml = remainingAfterScheme;
+  const [vertAlignXml, remainingAfterVertAlign] = takeFirstTag(
+    remainingXml,
+    /<vertAlign\b([^>]*?)(?:\/>|>[\s\S]*?<\/vertAlign>)/,
+  );
+  remainingXml = remainingAfterVertAlign;
+
+  return {
+    definition: {
+      bold: boldXml ? true : null,
+      italic: italicXml ? true : null,
+      underline: parseUnderlineValue(underlineXml),
+      strike: strikeXml ? true : null,
+      outline: outlineXml ? true : null,
+      shadow: shadowXml ? true : null,
+      condense: condenseXml ? true : null,
+      extend: extendXml ? true : null,
+      size: parseTagValNumber(sizeXml),
+      name: parseTagValString(nameXml),
+      family: parseTagValNumber(familyXml),
+      charset: parseTagValNumber(charsetXml),
+      scheme: parseTagValString(schemeXml),
+      vertAlign: parseTagValString(vertAlignXml),
+      color: parseFontColorDefinition(colorXml),
+    },
+    extraChildrenXml: /\S/.test(remainingXml) ? remainingXml : "",
   };
 }
 
@@ -748,6 +879,53 @@ function parseAlignmentDefinition(attributes: Array<[string, string]>): CellStyl
   assignNumberAttribute(alignment, "readingOrder", findAttributeValue(attributes, "readingOrder"));
 
   return alignment;
+}
+
+function appendFontToStylesXml(stylesXml: string, fontXml: string): string {
+  const fontsMatch = stylesXml.match(/<fonts\b([^>]*)>([\s\S]*?)<\/fonts>/);
+  if (!fontsMatch || fontsMatch.index === undefined) {
+    throw new XlsxError("styles.xml is missing <fonts>");
+  }
+
+  const attributes = parseAttributes(fontsMatch[1]);
+  const nextCount = Array.from(fontsMatch[2].matchAll(/<font\b/g)).length + 1;
+  const nextAttributes = upsertAttribute(attributes, "count", String(nextCount));
+  const serializedAttributes = serializeAttributes(nextAttributes);
+  const trailingWhitespace = fontsMatch[2].match(/\s*$/)?.[0] ?? "";
+  const innerXmlWithoutTrailing = fontsMatch[2].slice(0, fontsMatch[2].length - trailingWhitespace.length);
+  const closingIndentMatch = trailingWhitespace.match(/\n([ \t]*)$/);
+  const entryPrefix = closingIndentMatch ? `\n${closingIndentMatch[1]}  ` : "";
+  const nextInnerXml = `${innerXmlWithoutTrailing}${entryPrefix}${fontXml}${trailingWhitespace}`;
+  const nextFontsXml = `<fonts${serializedAttributes ? ` ${serializedAttributes}` : ""}>${nextInnerXml}</fonts>`;
+
+  return stylesXml.slice(0, fontsMatch.index) + nextFontsXml + stylesXml.slice(fontsMatch.index + fontsMatch[0].length);
+}
+
+function replaceFontInStylesXml(stylesXml: string, fontId: number, fontXml: string): string {
+  const fontsMatch = stylesXml.match(/<fonts\b([^>]*)>([\s\S]*?)<\/fonts>/);
+  if (!fontsMatch || fontsMatch.index === undefined) {
+    throw new XlsxError("styles.xml is missing <fonts>");
+  }
+
+  const innerXml = fontsMatch[2];
+  let currentFontIndex = 0;
+
+  for (const match of innerXml.matchAll(/<font\b[^>]*?>([\s\S]*?)<\/font>|<font\b[^>]*?\/>/g)) {
+    if (currentFontIndex !== fontId) {
+      currentFontIndex += 1;
+      continue;
+    }
+
+    if (match.index === undefined) {
+      break;
+    }
+
+    const nextInnerXml = innerXml.slice(0, match.index) + fontXml + innerXml.slice(match.index + match[0].length);
+    const nextFontsXml = `<fonts${fontsMatch[1]}>${nextInnerXml}</fonts>`;
+    return stylesXml.slice(0, fontsMatch.index) + nextFontsXml + stylesXml.slice(fontsMatch.index + fontsMatch[0].length);
+  }
+
+  throw new XlsxError(`Font not found: ${fontId}`);
 }
 
 function appendCellXfToStylesXml(stylesXml: string, xfXml: string): string {
@@ -820,6 +998,12 @@ function buildPatchedCellXfXml(sourceStyle: ParsedCellStyle, patch: CellStylePat
   return `<xf${serializedAttributes ? ` ${serializedAttributes}` : ""}>${innerXml}</xf>`;
 }
 
+function buildPatchedFontXml(sourceFont: ParsedFont, patch: CellFontPatch): string {
+  const font = applyFontPatch(sourceFont.definition, patch);
+  const childXml = buildFontChildXml(font) + sourceFont.extraChildrenXml;
+  return childXml.length === 0 ? "<font/>" : `<font>${childXml}</font>`;
+}
+
 function applyCellStylePatch(attributes: Array<[string, string]>, patch: CellStylePatch): Array<[string, string]> {
   let nextAttributes = [...attributes];
 
@@ -871,6 +1055,58 @@ function buildSelfClosingTag(tagName: string, attributes: Array<[string, string]
   return `<${tagName}${serializedAttributes ? ` ${serializedAttributes}` : ""}/>`;
 }
 
+function buildFontChildXml(font: CellFontDefinition): string {
+  const parts: string[] = [];
+
+  if (font.bold) {
+    parts.push("<b/>");
+  }
+  if (font.italic) {
+    parts.push("<i/>");
+  }
+  if (font.underline !== null) {
+    parts.push(font.underline === "single" ? "<u/>" : buildSelfClosingTag("u", [["val", font.underline]]));
+  }
+  if (font.strike) {
+    parts.push("<strike/>");
+  }
+  if (font.outline) {
+    parts.push("<outline/>");
+  }
+  if (font.shadow) {
+    parts.push("<shadow/>");
+  }
+  if (font.condense) {
+    parts.push("<condense/>");
+  }
+  if (font.extend) {
+    parts.push("<extend/>");
+  }
+  if (font.color) {
+    parts.push(buildSelfClosingTag("color", buildFontColorAttributes(font.color)));
+  }
+  if (font.size !== null) {
+    parts.push(buildSelfClosingTag("sz", [["val", String(font.size)]]));
+  }
+  if (font.name !== null) {
+    parts.push(buildSelfClosingTag("name", [["val", font.name]]));
+  }
+  if (font.family !== null) {
+    parts.push(buildSelfClosingTag("family", [["val", String(font.family)]]));
+  }
+  if (font.charset !== null) {
+    parts.push(buildSelfClosingTag("charset", [["val", String(font.charset)]]));
+  }
+  if (font.scheme !== null) {
+    parts.push(buildSelfClosingTag("scheme", [["val", font.scheme]]));
+  }
+  if (font.vertAlign !== null) {
+    parts.push(buildSelfClosingTag("vertAlign", [["val", font.vertAlign]]));
+  }
+
+  return parts.join("");
+}
+
 function cloneCellStyleDefinition(style: CellStyleDefinition | null): CellStyleDefinition | null {
   if (!style) {
     return null;
@@ -882,8 +1118,179 @@ function cloneCellStyleDefinition(style: CellStyleDefinition | null): CellStyleD
   };
 }
 
+function cloneCellFontDefinition(font: CellFontDefinition | null): CellFontDefinition | null {
+  if (!font) {
+    return null;
+  }
+
+  return {
+    ...font,
+    color: font.color ? { ...font.color } : null,
+  };
+}
+
+function buildEmptyFontDefinition(): CellFontDefinition {
+  return {
+    bold: null,
+    italic: null,
+    underline: null,
+    strike: null,
+    outline: null,
+    shadow: null,
+    condense: null,
+    extend: null,
+    size: null,
+    name: null,
+    family: null,
+    charset: null,
+    scheme: null,
+    vertAlign: null,
+    color: null,
+  };
+}
+
+function applyFontPatch(sourceFont: CellFontDefinition, patch: CellFontPatch): CellFontDefinition {
+  return {
+    bold: patch.bold === undefined ? sourceFont.bold : patch.bold,
+    italic: patch.italic === undefined ? sourceFont.italic : patch.italic,
+    underline: patch.underline === undefined ? sourceFont.underline : patch.underline,
+    strike: patch.strike === undefined ? sourceFont.strike : patch.strike,
+    outline: patch.outline === undefined ? sourceFont.outline : patch.outline,
+    shadow: patch.shadow === undefined ? sourceFont.shadow : patch.shadow,
+    condense: patch.condense === undefined ? sourceFont.condense : patch.condense,
+    extend: patch.extend === undefined ? sourceFont.extend : patch.extend,
+    size: patch.size === undefined ? sourceFont.size : patch.size,
+    name: patch.name === undefined ? sourceFont.name : patch.name,
+    family: patch.family === undefined ? sourceFont.family : patch.family,
+    charset: patch.charset === undefined ? sourceFont.charset : patch.charset,
+    scheme: patch.scheme === undefined ? sourceFont.scheme : patch.scheme,
+    vertAlign: patch.vertAlign === undefined ? sourceFont.vertAlign : patch.vertAlign,
+    color: applyFontColorPatch(sourceFont.color, patch.color),
+  };
+}
+
+function applyFontColorPatch(
+  sourceColor: CellFontColor | null,
+  patch: CellFontColorPatch | null | undefined,
+): CellFontColor | null {
+  if (patch === undefined) {
+    return sourceColor ? { ...sourceColor } : null;
+  }
+  if (patch === null) {
+    return null;
+  }
+
+  const nextColor: CellFontColor = sourceColor ? { ...sourceColor } : {};
+  updateOptionalObjectProperty(nextColor, "rgb", patch.rgb);
+  updateOptionalObjectProperty(nextColor, "theme", patch.theme);
+  updateOptionalObjectProperty(nextColor, "indexed", patch.indexed);
+  updateOptionalObjectProperty(nextColor, "auto", patch.auto);
+  updateOptionalObjectProperty(nextColor, "tint", patch.tint);
+
+  return Object.keys(nextColor).length === 0 ? null : nextColor;
+}
+
+function buildFontColorAttributes(color: CellFontColor): Array<[string, string]> {
+  const attributes: Array<[string, string]> = [];
+  if (color.rgb !== undefined) {
+    attributes.push(["rgb", color.rgb]);
+  }
+  if (color.theme !== undefined) {
+    attributes.push(["theme", String(color.theme)]);
+  }
+  if (color.indexed !== undefined) {
+    attributes.push(["indexed", String(color.indexed)]);
+  }
+  if (color.auto !== undefined) {
+    attributes.push(["auto", color.auto ? "1" : "0"]);
+  }
+  if (color.tint !== undefined) {
+    attributes.push(["tint", String(color.tint)]);
+  }
+  return attributes;
+}
+
+function updateOptionalObjectProperty<T extends object, K extends keyof T>(
+  target: T,
+  key: K,
+  value: T[K] | null | undefined,
+): void {
+  if (value === undefined) {
+    return;
+  }
+
+  if (value === null) {
+    delete target[key];
+    return;
+  }
+
+  target[key] = value;
+}
+
 function findAttributeValue(attributes: Array<[string, string]>, name: string): string | undefined {
   return attributes.find(([attributeName]) => attributeName === name)?.[1];
+}
+
+function takeFirstTag(xml: string, pattern: RegExp): [string | null, string] {
+  const match = xml.match(pattern);
+  if (!match || match.index === undefined) {
+    return [null, xml];
+  }
+
+  return [match[0], xml.slice(0, match.index) + xml.slice(match.index + match[0].length)];
+}
+
+function parseTagValNumber(tagXml: string | null): number | null {
+  if (!tagXml) {
+    return null;
+  }
+  const value = getXmlAttr(tagXml, "val");
+  return value === undefined ? null : Number(value);
+}
+
+function parseTagValString(tagXml: string | null): string | null {
+  if (!tagXml) {
+    return null;
+  }
+  return getXmlAttr(tagXml, "val") ?? null;
+}
+
+function parseUnderlineValue(tagXml: string | null): string | null {
+  if (!tagXml) {
+    return null;
+  }
+  return getXmlAttr(tagXml, "val") ?? "single";
+}
+
+function parseFontColorDefinition(tagXml: string | null): CellFontColor | null {
+  if (!tagXml) {
+    return null;
+  }
+
+  const color: CellFontColor = {};
+  const rgb = getXmlAttr(tagXml, "rgb");
+  const theme = getXmlAttr(tagXml, "theme");
+  const indexed = getXmlAttr(tagXml, "indexed");
+  const auto = getXmlAttr(tagXml, "auto");
+  const tint = getXmlAttr(tagXml, "tint");
+
+  if (rgb !== undefined) {
+    color.rgb = rgb;
+  }
+  if (theme !== undefined) {
+    color.theme = Number(theme);
+  }
+  if (indexed !== undefined) {
+    color.indexed = Number(indexed);
+  }
+  if (auto !== undefined) {
+    color.auto = auto === "1" || auto === "true";
+  }
+  if (tint !== undefined) {
+    color.tint = Number(tint);
+  }
+
+  return Object.keys(color).length === 0 ? null : color;
 }
 
 function parseRequiredIntegerAttribute(
@@ -1018,6 +1425,35 @@ function assertCellStylePatch(patch: CellStylePatch): void {
   }
 }
 
+function assertCellFontPatch(patch: CellFontPatch): void {
+  assertOptionalNullableBoolean(patch.bold, "bold");
+  assertOptionalNullableBoolean(patch.italic, "italic");
+  assertOptionalNullableString(patch.underline, "underline");
+  assertOptionalNullableBoolean(patch.strike, "strike");
+  assertOptionalNullableBoolean(patch.outline, "outline");
+  assertOptionalNullableBoolean(patch.shadow, "shadow");
+  assertOptionalNullableBoolean(patch.condense, "condense");
+  assertOptionalNullableBoolean(patch.extend, "extend");
+  assertOptionalNullableFiniteNumber(patch.size, "size");
+  assertOptionalNullableString(patch.name, "name");
+  assertOptionalNullableNonNegativeInteger(patch.family, "family");
+  assertOptionalNullableNonNegativeInteger(patch.charset, "charset");
+  assertOptionalNullableString(patch.scheme, "scheme");
+  assertOptionalNullableString(patch.vertAlign, "vertAlign");
+
+  if (patch.color !== undefined && patch.color !== null) {
+    assertCellFontColorPatch(patch.color);
+  }
+}
+
+function assertCellFontColorPatch(patch: CellFontColorPatch): void {
+  assertOptionalNullableString(patch.rgb, "color.rgb");
+  assertOptionalNullableNonNegativeInteger(patch.theme, "color.theme");
+  assertOptionalNullableNonNegativeInteger(patch.indexed, "color.indexed");
+  assertOptionalNullableBoolean(patch.auto, "color.auto");
+  assertOptionalNullableFiniteNumber(patch.tint, "color.tint");
+}
+
 function assertCellStyleAlignmentPatch(patch: CellStyleAlignmentPatch): void {
   assertOptionalNullableString(patch.horizontal, "alignment.horizontal");
   assertOptionalNullableString(patch.vertical, "alignment.vertical");
@@ -1038,6 +1474,12 @@ function assertOptionalNonNegativeInteger(value: number | undefined, name: strin
 
 function assertOptionalNullableNonNegativeInteger(value: number | null | undefined, name: string): void {
   if (value !== undefined && value !== null && (!Number.isInteger(value) || value < 0)) {
+    throw new XlsxError(`Invalid ${name}: ${value}`);
+  }
+}
+
+function assertOptionalNullableFiniteNumber(value: number | null | undefined, name: string): void {
+  if (value !== undefined && value !== null && !Number.isFinite(value)) {
     throw new XlsxError(`Invalid ${name}: ${value}`);
   }
 }

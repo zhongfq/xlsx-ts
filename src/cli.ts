@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -573,6 +573,36 @@ function createProgram(io: Required<CliIo>): Command {
   const table = program
     .command("table")
     .description("Operate on structured sheets with explicit header and data row boundaries");
+
+  table
+    .command("generate-profiles")
+    .argument("<files...>", "input xlsx files")
+    .option("--sheet-filter <regex>", "regular expression used to select sheet names", parseRegex)
+    .option("--output <file>", "write generated profiles JSON to a file")
+    .action(
+      async (
+        files: string[],
+        options: {
+          output?: string;
+          sheetFilter?: RegExp;
+        },
+      ) => {
+        const inputPaths = files.map((file) => resolveFrom(io.cwd, file));
+        const result = await generateTableProfiles(inputPaths, {
+          sheetFilter: options.sheetFilter,
+        });
+        const outputPath = options.output ? resolveFrom(io.cwd, options.output) : null;
+
+        if (outputPath) {
+          await writeFile(outputPath, `${JSON.stringify({ profiles: result.profiles }, null, 2)}\n`);
+        }
+
+        writeJson(io.stdout, {
+          ...result,
+          output: outputPath,
+        });
+      },
+    );
 
   table
     .command("inspect")
@@ -1642,6 +1672,45 @@ async function getStructuredTableRecord(
   };
 }
 
+async function generateTableProfiles(
+  filePaths: string[],
+  options: {
+    sheetFilter?: RegExp;
+  } = {},
+): Promise<{
+  files: string[];
+  profileNames: string[];
+  profiles: Record<string, TableProfile>;
+}> {
+  const profiles: Record<string, TableProfile> = {};
+  const files: string[] = [];
+
+  for (const filePath of filePaths) {
+    const workbook = await Workbook.open(filePath);
+    files.push(filePath);
+
+    const sheets =
+      options.sheetFilter === undefined
+        ? workbook.getSheets()
+        : workbook.getSheets().filter((sheet) => options.sheetFilter!.test(sheet.name));
+
+    for (const sheet of sheets) {
+      const profileName = inferProfileName(filePath, sheet.name);
+      if (Object.hasOwn(profiles, profileName)) {
+        throw new Error(`Duplicate generated profile name: ${profileName}`);
+      }
+
+      profiles[profileName] = inferTableProfile(sheet);
+    }
+  }
+
+  return {
+    files,
+    profileNames: Object.keys(profiles),
+    profiles,
+  };
+}
+
 async function readConfigTableSyncInput(
   filePath: string,
   field: string,
@@ -2019,6 +2088,14 @@ function parseConfigTableSyncMode(value: string): ConfigTableSyncMode {
   throw new InvalidArgumentError(`Expected replace or upsert, got: ${value}`);
 }
 
+function parseRegex(value: string): RegExp {
+  try {
+    return new RegExp(value);
+  } catch (error) {
+    throw new InvalidArgumentError(`Expected a valid regular expression, got: ${value}; ${formatError(error)}`);
+  }
+}
+
 function resolveMatchValue(value?: string, text?: string): CellValue {
   const actionCount = Number(value !== undefined) + Number(text !== undefined);
   if (actionCount !== 1) {
@@ -2202,6 +2279,19 @@ function getTableHeaders(sheet: ReturnType<Workbook["getSheet"]>, headerRow: num
   return sheet.getRow(headerRow).map((value) => (typeof value === "string" ? value : ""));
 }
 
+function inferTableProfile(sheet: ReturnType<Workbook["getSheet"]>): TableProfile {
+  const headerRow = inferTableHeaderRow(sheet);
+  const dataStartRow = inferTableDataStartRow(sheet, headerRow);
+  const keyFields = inferTableKeyFields(getTableHeaders(sheet, headerRow));
+
+  return {
+    dataStartRow,
+    headerRow,
+    keyFields: keyFields.length > 0 ? keyFields : undefined,
+    sheet: sheet.name,
+  };
+}
+
 function resolveTableKeyFields(
   sheet: ReturnType<Workbook["getSheet"]>,
   headerRow: number,
@@ -2211,13 +2301,9 @@ function resolveTableKeyFields(
     return explicitKeyFields;
   }
 
-  const headers = getTableHeaders(sheet, headerRow);
-  if (headers.includes("id")) {
-    return ["id"];
-  }
-
-  if (headers.includes("key")) {
-    return ["key"];
+  const inferred = inferTableKeyFields(getTableHeaders(sheet, headerRow));
+  if (inferred.length > 0) {
+    return inferred;
   }
 
   throw new Error("Unable to infer key fields; pass --key-field explicitly");
@@ -2341,6 +2427,151 @@ function listStructuredTableRows(
   }
 
   return rows;
+}
+
+function inferTableHeaderRow(sheet: ReturnType<Workbook["getSheet"]>): number {
+  const maxRow = Math.min(sheet.rowCount, 20);
+  let bestRow = 0;
+  let bestScore = Number.NEGATIVE_INFINITY;
+
+  for (let row = 1; row <= maxRow; row += 1) {
+    const score = scoreHeaderRowCandidate(sheet, row);
+    if (score > bestScore) {
+      bestScore = score;
+      bestRow = row;
+    }
+  }
+
+  if (bestRow === 0 || bestScore < 4) {
+    throw new Error(`Unable to infer table header row for sheet: ${sheet.name}`);
+  }
+
+  return bestRow;
+}
+
+function inferTableDataStartRow(sheet: ReturnType<Workbook["getSheet"]>, headerRow: number): number {
+  for (let row = headerRow + 1; row <= sheet.rowCount; row += 1) {
+    const values = sheet.getRow(row);
+    if (isRowEmpty(values)) {
+      continue;
+    }
+
+    const firstValue = values[0];
+    if (typeof firstValue === "string" && (isMetadataMarker(firstValue) || looksLikeTypeDescriptor(firstValue))) {
+      continue;
+    }
+
+    if (sheet.getRecord(row, headerRow) !== null) {
+      return row;
+    }
+  }
+
+  throw new Error(`Unable to infer table data start row for sheet: ${sheet.name}`);
+}
+
+function scoreHeaderRowCandidate(sheet: ReturnType<Workbook["getSheet"]>, row: number): number {
+  const values = sheet.getRow(row);
+  const headers = trimTrailingEmptyStrings(values.map((value) => (typeof value === "string" ? value.trim() : "")));
+  const nonEmptyHeaders = headers.filter((header) => header.length > 0);
+
+  if (nonEmptyHeaders.length < 2) {
+    return Number.NEGATIVE_INFINITY;
+  }
+
+  if (nonEmptyHeaders.some((header) => isMetadataMarker(header))) {
+    return Number.NEGATIVE_INFINITY;
+  }
+
+  const uniqueHeaders = new Set(nonEmptyHeaders);
+  let score = nonEmptyHeaders.length * 2;
+
+  if (uniqueHeaders.size === nonEmptyHeaders.length) {
+    score += 3;
+  }
+
+  if (nonEmptyHeaders.some((header) => header === "id" || header === "key" || /^key\d+$/.test(header))) {
+    score += 4;
+  }
+
+  if (headers[0]?.startsWith("@")) {
+    score -= 8;
+  }
+
+  return score;
+}
+
+function inferTableKeyFields(headers: string[]): string[] {
+  const trimmedHeaders = headers.map((header) => header.trim()).filter((header) => header.length > 0);
+  const compositeKeys: string[] = [];
+
+  for (let index = 1; ; index += 1) {
+    const name = `key${index}`;
+    if (!trimmedHeaders.includes(name)) {
+      break;
+    }
+
+    compositeKeys.push(name);
+  }
+
+  if (compositeKeys.length > 0) {
+    return compositeKeys;
+  }
+
+  if (trimmedHeaders.includes("key")) {
+    return ["key"];
+  }
+
+  if (trimmedHeaders.includes("id")) {
+    return ["id"];
+  }
+
+  return [];
+}
+
+function isRowEmpty(values: CellValue[]): boolean {
+  return values.every((value) => value === null || value === "");
+}
+
+function isMetadataMarker(value: string): boolean {
+  return value === "auto" || value === ">>" || value === "!!!" || value === "###";
+}
+
+function looksLikeTypeDescriptor(value: string): boolean {
+  const normalized = value.trim();
+  return (
+    normalized === "int" ||
+    normalized === "string" ||
+    normalized === "bool" ||
+    normalized === "float" ||
+    normalized === "number" ||
+    normalized === "table" ||
+    normalized === "items" ||
+    normalized === "json" ||
+    normalized === "int?" ||
+    normalized === "string?" ||
+    normalized === "bool?" ||
+    normalized === "float?" ||
+    normalized === "number?" ||
+    normalized === "table?" ||
+    normalized === "items?" ||
+    normalized === "json?" ||
+    normalized === "int[]" ||
+    normalized === "string[]" ||
+    normalized === "bool[]" ||
+    normalized === "float[]" ||
+    normalized === "number[]" ||
+    normalized === "table[]" ||
+    normalized === "items[]" ||
+    normalized === "json[]" ||
+    /^@[a-zA-Z_][a-zA-Z0-9_]*$/.test(normalized)
+  );
+}
+
+function inferProfileName(filePath: string, sheetName: string): string {
+  const normalized = filePath.replaceAll("\\", "/");
+  const fileName = normalized.slice(normalized.lastIndexOf("/") + 1);
+  const withoutExtension = fileName.replace(/\.[^.]+$/, "");
+  return `${withoutExtension}#${sheetName}`;
 }
 
 function matchesKey(record: CellRecord, keyFields: string[], key: CellRecord): boolean {

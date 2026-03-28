@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -778,6 +778,121 @@ test("table command group supports composite key profiles", async () => {
   }
 });
 
+test("table generate-profiles scans full workbooks and supports multiple xlsx inputs", async () => {
+  const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-cli-test-"));
+
+  try {
+    const inputPath = await writeProfileGenerationWorkbook(tempRoot);
+    const secondInputPath = await writeCompositeStructuredTableWorkbook(join(tempRoot, "second"), "define.xlsx");
+    const outputPath = join(tempRoot, "generated-profiles.json");
+    const result = await runCliCapture([
+      "table",
+      "generate-profiles",
+      inputPath,
+      secondInputPath,
+      "--output",
+      outputPath,
+    ]);
+
+    assert.equal(result.exitCode, 0);
+
+    const payload = JSON.parse(result.stdout);
+    assert.deepEqual(payload.files, [inputPath, secondInputPath]);
+    assert.deepEqual(payload.profileNames, [
+      "input#Sheet1",
+      "input#Config Values",
+      "define#Sheet1",
+    ]);
+    assert.equal(payload.output, outputPath);
+    assert.deepEqual(payload.profiles, {
+      "input#Sheet1": {
+        sheet: "Sheet1",
+        headerRow: 1,
+        dataStartRow: 6,
+        keyFields: ["id"],
+      },
+      "input#Config Values": {
+        sheet: "Config Values",
+        headerRow: 2,
+        dataStartRow: 7,
+        keyFields: ["key"],
+      },
+      "define#Sheet1": {
+        sheet: "Sheet1",
+        headerRow: 2,
+        dataStartRow: 7,
+        keyFields: ["key1", "key2"],
+      },
+    });
+
+    assert.deepEqual(JSON.parse(await readFile(outputPath, "utf8")), {
+      profiles: payload.profiles,
+    });
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("table generate-profiles infers composite keys from key1/key2 headers", async () => {
+  const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-cli-test-"));
+
+  try {
+    const inputPath = await writeCompositeStructuredTableWorkbook(tempRoot);
+    const result = await runCliCapture([
+      "table",
+      "generate-profiles",
+      inputPath,
+    ]);
+
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout).profiles, {
+      "input#Sheet1": {
+        sheet: "Sheet1",
+        headerRow: 2,
+        dataStartRow: 7,
+        keyFields: ["key1", "key2"],
+      },
+    });
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("table generate-profiles filters sheets by regular expression", async () => {
+  const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-cli-test-"));
+
+  try {
+    const inputPath = await writeProfileGenerationWorkbook(tempRoot);
+    const secondInputPath = await writeCompositeStructuredTableWorkbook(join(tempRoot, "second"), "define.xlsx");
+    const result = await runCliCapture([
+      "table",
+      "generate-profiles",
+      inputPath,
+      secondInputPath,
+      "--sheet-filter",
+      "^(Sheet1|conf)$",
+    ]);
+
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout).profiles, {
+      "input#Sheet1": {
+        sheet: "Sheet1",
+        headerRow: 1,
+        dataStartRow: 6,
+        keyFields: ["id"],
+      },
+      "define#Sheet1": {
+        sheet: "Sheet1",
+        headerRow: 2,
+        dataStartRow: 7,
+        keyFields: ["key1", "key2"],
+      },
+    });
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("style commands update formatting and can copy styles through the CLI", async () => {
   const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-cli-test-"));
 
@@ -1031,11 +1146,12 @@ async function runCliCapture(argv: string[]): Promise<{
   return { exitCode, stderr, stdout };
 }
 
-async function writeFixtureWorkbook(rootDirectory: string): Promise<string> {
+async function writeFixtureWorkbook(rootDirectory: string, fileName = "input.xlsx"): Promise<string> {
+  await mkdir(rootDirectory, { recursive: true });
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = await loadFixtureEntries(fixtureDir);
   const workbook = Workbook.fromEntries(entries);
-  const inputPath = join(rootDirectory, "input.xlsx");
+  const inputPath = join(rootDirectory, fileName);
   await workbook.save(inputPath);
   return inputPath;
 }
@@ -1057,8 +1173,8 @@ async function writeStructuredTableWorkbook(rootDirectory: string): Promise<stri
   return inputPath;
 }
 
-async function writeCompositeStructuredTableWorkbook(rootDirectory: string): Promise<string> {
-  const inputPath = await writeFixtureWorkbook(rootDirectory);
+async function writeCompositeStructuredTableWorkbook(rootDirectory: string, fileName = "input.xlsx"): Promise<string> {
+  const inputPath = await writeFixtureWorkbook(rootDirectory, fileName);
   const workbook = await Workbook.open(inputPath);
   const sheet = workbook.getSheet("Sheet1");
 
@@ -1080,6 +1196,23 @@ async function writeCompositeStructuredTableWorkbook(rootDirectory: string): Pro
   sheet.setRow(6, ["###", "注释", null, null, "注释", null, null, null, null]);
   sheet.setRow(7, ["-", "任务类型", "TASK_TYPE", "MAIN", "主线任务", 1, "int", "TaskType", "true"]);
   sheet.setRow(8, ["-", null, "TASK_TYPE", "BRANCH", "支线任务", 2, "int", null, null]);
+
+  await workbook.save(inputPath);
+  return inputPath;
+}
+
+async function writeProfileGenerationWorkbook(rootDirectory: string): Promise<string> {
+  const inputPath = await writeStructuredTableWorkbook(rootDirectory);
+  const workbook = await Workbook.open(inputPath);
+  const sheet = workbook.addSheet("Config Values");
+
+  sheet.setRow(1, ["@config"]);
+  sheet.setRow(2, ["id", "key", "value", "value_type", "value_comment"]);
+  sheet.setRow(3, ["auto", "string", "string", "string", "string"]);
+  sheet.setRow(4, [">>", null, null, null, null]);
+  sheet.setRow(5, ["!!!", "x", "x", "x", "x"]);
+  sheet.setRow(6, ["###", "键", "值", "值类型", "描述"]);
+  sheet.setRow(7, ["-", "FOO", 1, "int", "示例"]);
 
   await workbook.save(inputPath);
   return inputPath;

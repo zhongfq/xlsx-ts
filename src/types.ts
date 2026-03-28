@@ -7,6 +7,15 @@ export type CellValue = string | number | boolean | null;
 export type CellType = "missing" | "blank" | "string" | "number" | "boolean" | "formula";
 export type SheetVisibility = "visible" | "hidden" | "veryHidden";
 
+export interface CellSnapshot {
+  exists: boolean;
+  formula: string | null;
+  rawType: string | null;
+  styleId: number | null;
+  type: CellType;
+  value: CellValue;
+}
+
 export interface DefinedName {
   hidden: boolean;
   name: string;

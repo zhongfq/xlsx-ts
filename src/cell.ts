@@ -1,14 +1,5 @@
 import type { Sheet } from "./sheet.js";
-import type { CellType, CellValue, SetFormulaOptions } from "./types.js";
-
-interface CellSnapshot {
-  exists: boolean;
-  formula: string | null;
-  rawType: string | null;
-  styleId: number | null;
-  type: CellType;
-  value: CellValue;
-}
+import type { CellSnapshot, CellType, CellValue, SetFormulaOptions } from "./types.js";
 
 export class Cell {
   readonly address: string;

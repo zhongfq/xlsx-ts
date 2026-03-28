@@ -3,6 +3,7 @@ export { Sheet } from "./sheet.js";
 export { Workbook } from "./workbook.js";
 export type {
   ArchiveEntry,
+  CellSnapshot,
   CellType,
   CellValue,
   DataValidation,

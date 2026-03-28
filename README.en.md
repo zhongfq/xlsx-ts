@@ -59,6 +59,7 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `workbook.listEntries()`
 - `workbook.getSheets()`
 - `workbook.getSheet(name)`
+- `workbook.getActiveSheet()`
 - `workbook.getSheetVisibility(name)`
 - `workbook.getDefinedNames()`
 - `workbook.getDefinedName(name, scope?)`
@@ -69,6 +70,7 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `workbook.addSheet(name)`
 - `workbook.deleteSheet(name)`
 - `workbook.setSheetVisibility(name, visibility)`
+- `workbook.setActiveSheet(name)`
 - `sheet.cell(address)`
 - `sheet.cell(rowNumber, column)`
 - `sheet.rename(name)`
@@ -136,11 +138,13 @@ const sheet = workbook.getSheet("Sheet1");
 const scoreCell = sheet.cell("B2");
 const scoreValue = sheet.getCell(2, 2);
 const detailSheet = workbook.addSheet("Detail");
+const activeSheet = workbook.getActiveSheet();
 
 workbook.setDefinedName("Scores", "Summary!$A$1:$B$10");
 workbook.setDefinedName("LocalScore", "$B$2", { scope: "Summary" });
 workbook.renameSheet("Sheet1", "Summary");
 workbook.moveSheet("Summary", 0);
+workbook.setActiveSheet("Summary");
 workbook.setSheetVisibility("Summary", "hidden");
 detailSheet.rename("Detail 2026");
 console.log(sheet.getTables());
@@ -222,6 +226,7 @@ Notes:
 - `sheet.setHyperlink()` and `sheet.removeHyperlink()` currently manage worksheet `<hyperlinks>` plus the matching sheet relationship for external links. Internal targets use a format like `#Sheet1!A1`.
 - `workbook.getDefinedNames()`, `getDefinedName()`, `setDefinedName()`, and `deleteDefinedName()` currently support both global and local defined names.
 - `workbook.getSheetVisibility()` and `setSheetVisibility()` currently support `visible`, `hidden`, and `veryHidden`, and prevent hiding the last visible sheet in the workbook.
+- `workbook.getActiveSheet()` and `setActiveSheet()` currently read and write `workbookView.activeTab`; if the workbook does not yet contain `bookViews`, they are created automatically, and hidden sheets cannot be activated.
 - `workbook.renameSheet()` and `sheet.rename()` currently update sheet names, explicit formula references in other sheets, `definedNames`, internal hyperlink locations, and document properties.
 - `workbook.moveSheet()` currently uses a 0-based `targetIndex` and keeps workbook `<sheets>` order, worksheet order in `docProps/app.xml`, local defined-name `localSheetId` values, and `workbookView.activeTab` aligned.
 - `workbook.addSheet()` and `workbook.deleteSheet()` currently maintain `workbook.xml`, workbook rels, and `[Content_Types].xml`, and adjust remaining formulas and `definedNames` when a sheet is deleted.

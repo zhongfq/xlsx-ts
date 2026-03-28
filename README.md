@@ -54,6 +54,7 @@
 - `workbook.listEntries()`
 - `workbook.getSheets()`
 - `workbook.getSheet(name)`
+- `workbook.getActiveSheet()`
 - `workbook.getSheetVisibility(name)`
 - `workbook.getDefinedNames()`
 - `workbook.getDefinedName(name, scope?)`
@@ -64,6 +65,7 @@
 - `workbook.addSheet(name)`
 - `workbook.deleteSheet(name)`
 - `workbook.setSheetVisibility(name, visibility)`
+- `workbook.setActiveSheet(name)`
 - `sheet.cell(address)`
 - `sheet.cell(rowNumber, column)`
 - `sheet.rename(name)`
@@ -131,11 +133,13 @@ const sheet = workbook.getSheet("Sheet1");
 const scoreCell = sheet.cell("B2");
 const scoreValue = sheet.getCell(2, 2);
 const detailSheet = workbook.addSheet("Detail");
+const activeSheet = workbook.getActiveSheet();
 
 workbook.setDefinedName("Scores", "Summary!$A$1:$B$10");
 workbook.setDefinedName("LocalScore", "$B$2", { scope: "Summary" });
 workbook.renameSheet("Sheet1", "Summary");
 workbook.moveSheet("Summary", 0);
+workbook.setActiveSheet("Summary");
 workbook.setSheetVisibility("Summary", "hidden");
 detailSheet.rename("Detail 2026");
 console.log(sheet.getTables());
@@ -217,6 +221,7 @@ await workbook.save("output.xlsx");
 - 已有关联 table 在插删行列时会同步维护它们自己的 `ref` / `autoFilter`；如果整块 table 被删空，会从当前 sheet 的 `tableParts` 里移除
 - `workbook.getDefinedNames()` / `getDefinedName()` / `setDefinedName()` / `deleteDefinedName()` 当前支持读写全局和本地 `definedNames`
 - `workbook.getSheetVisibility()` / `setSheetVisibility()` 当前支持 `visible` / `hidden` / `veryHidden`；并会阻止把最后一张可见 sheet 隐藏掉
+- `workbook.getActiveSheet()` / `setActiveSheet()` 当前读写 `workbookView.activeTab`；如果 workbook 里还没有 `bookViews`，会自动补上；隐藏 sheet 不允许设为 active
 - `workbook.renameSheet()` / `sheet.rename()` 当前会同步维护 sheet 名、其它 sheet 的显式公式引用、`definedNames`、内部超链接位置和文档属性
 - `workbook.moveSheet()` 当前使用 0-based `targetIndex`，会同步维护 workbook 里的 `<sheets>` 顺序、`docProps/app.xml` 里的工作表顺序、本地 `definedNames` 的 `localSheetId`，以及 `workbookView.activeTab`
 - `workbook.addSheet()` / `workbook.deleteSheet()` 当前会同步维护 `workbook.xml`、rels、`[Content_Types].xml`，并在删除 sheet 时修正剩余公式与 `definedNames`

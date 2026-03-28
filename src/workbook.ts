@@ -74,6 +74,31 @@ export class Workbook {
     return sheet;
   }
 
+  getActiveSheet(): Sheet {
+    const context = this.getWorkbookContext();
+    const activeSheetIndex = parseActiveSheetIndex(this.readEntryText(context.workbookPath), context.sheets.length);
+    return context.sheets[activeSheetIndex] ?? context.sheets[0]!;
+  }
+
+  setActiveSheet(sheetName: string): Sheet {
+    const context = this.getWorkbookContext();
+    const targetIndex = context.sheets.findIndex((sheet) => sheet.name === sheetName);
+    if (targetIndex === -1) {
+      throw new XlsxError(`Sheet not found: ${sheetName}`);
+    }
+
+    if (this.getSheetVisibility(sheetName) !== "visible") {
+      throw new XlsxError(`Cannot activate hidden sheet: ${sheetName}`);
+    }
+
+    const workbookPath = context.workbookPath;
+    this.writeEntryText(
+      workbookPath,
+      updateActiveSheetInWorkbookXml(this.readEntryText(workbookPath), targetIndex),
+    );
+    return this.getSheet(sheetName);
+  }
+
   getSheetVisibility(sheetName: string): SheetVisibility {
     const context = this.getWorkbookContext();
     const sheet = context.sheets.find((candidate) => candidate.name === sheetName);
@@ -837,6 +862,48 @@ function updateSheetVisibilityInWorkbookXml(
   }
 
   return nextWorkbookXml;
+}
+
+function parseActiveSheetIndex(workbookXml: string, sheetCount: number): number {
+  const workbookViewMatch = workbookXml.match(/<workbookView\b([^>]*?)\/>/);
+  const activeTabText = workbookViewMatch ? getXmlAttr(workbookViewMatch[1], "activeTab") : undefined;
+  const activeTab = activeTabText === undefined ? 0 : Number(activeTabText);
+
+  if (!Number.isInteger(activeTab) || activeTab < 0 || activeTab >= sheetCount) {
+    return 0;
+  }
+
+  return activeTab;
+}
+
+function updateActiveSheetInWorkbookXml(workbookXml: string, activeSheetIndex: number): string {
+  const workbookViewsMatch = workbookXml.match(/<bookViews>([\s\S]*?)<\/bookViews>/);
+  const workbookViewXml = `<workbookView activeTab="${activeSheetIndex}"/>`;
+
+  if (!workbookViewsMatch) {
+    return workbookXml.replace(/<sheets>/, `<bookViews>${workbookViewXml}</bookViews><sheets>`);
+  }
+
+  const workbookViewsXml = workbookViewsMatch[0];
+  if (!/<workbookView\b/.test(workbookViewsXml)) {
+    return workbookXml.replace(/<bookViews>[\s\S]*?<\/bookViews>/, `<bookViews>${workbookViewXml}</bookViews>`);
+  }
+
+  return workbookXml.replace(
+    /<workbookView\b([^>]*?)\/>/,
+    (match, attributesSource) => {
+      const attributes = parseAttributes(attributesSource);
+      const activeTabIndex = attributes.findIndex(([name]) => name === "activeTab");
+      if (activeTabIndex === -1) {
+        attributes.push(["activeTab", String(activeSheetIndex)]);
+      } else {
+        attributes[activeTabIndex] = ["activeTab", String(activeSheetIndex)];
+      }
+
+      const serializedAttributes = serializeAttributes(attributes);
+      return `<workbookView${serializedAttributes ? ` ${serializedAttributes}` : ""}/>`;
+    },
+  );
 }
 
 function parseDefinedNames(workbookXml: string, sheets: Sheet[]): DefinedName[] {

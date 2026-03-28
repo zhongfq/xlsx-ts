@@ -1290,6 +1290,69 @@ test("workbook can move a sheet and remap local sheet scopes", async () => {
   assert.match(appXml, /<vt:lpstr>Sheet3<\/vt:lpstr><vt:lpstr>Sheet1<\/vt:lpstr><vt:lpstr>Sheet2<\/vt:lpstr>/);
 });
 
+test("workbook active sheet APIs read and write workbookView activeTab", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    replaceEntryText(
+      withSecondSheet(
+        await loadFixtureEntries(fixtureDir),
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1"><v>2</v></c></row>
+  </sheetData>
+</worksheet>`,
+      ),
+      "xl/workbook.xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <bookViews><workbookView activeTab="1"/></bookViews>
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+    <sheet name="Sheet2" sheetId="2" r:id="rId3"/>
+  </sheets>
+</workbook>`,
+    ),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1"><v>1</v></c></row>
+  </sheetData>
+</worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+
+  assert.equal(workbook.getActiveSheet().name, "Sheet2");
+  workbook.setActiveSheet("Sheet1");
+  assert.equal(workbook.getActiveSheet().name, "Sheet1");
+
+  let workbookXml = entryText(workbook.toEntries(), "xl/workbook.xml");
+  assert.match(workbookXml, /<workbookView activeTab="0"\/>/);
+
+  workbook.setSheetVisibility("Sheet2", "hidden");
+  assert.throws(() => workbook.setActiveSheet("Sheet2"), /Cannot activate hidden sheet: Sheet2/);
+
+  const withoutBookViews = Workbook.fromEntries(
+    replaceEntryText(
+      entries,
+      "xl/workbook.xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+    <sheet name="Sheet2" sheetId="2" r:id="rId3"/>
+  </sheets>
+</workbook>`,
+    ),
+  );
+
+  assert.equal(withoutBookViews.getActiveSheet().name, "Sheet1");
+  withoutBookViews.setActiveSheet("Sheet2");
+  workbookXml = entryText(withoutBookViews.toEntries(), "xl/workbook.xml");
+  assert.match(workbookXml, /<bookViews><workbookView activeTab="1"\/><\/bookViews>\s*<sheets>/);
+});
+
 test("workbook sheet visibility APIs read and write hidden states", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = replaceEntryText(

@@ -1147,6 +1147,81 @@ test("sheet rename updates workbook metadata, formulas, and hyperlink locations"
   assert.match(appXml, /<vt:lpstr>Data Set<\/vt:lpstr><vt:lpstr>Sheet2<\/vt:lpstr>/);
 });
 
+test("sheet hyperlink APIs read, write, replace, and delete hyperlinks", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    withSecondSheet(
+      await loadFixtureEntries(fixtureDir),
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1"><v>1</v></c></row>
+  </sheetData>
+</worksheet>`,
+    ),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1"><is><t>Old</t></is></c></row>
+    <row r="2"><c r="B2"><v>1</v></c></row>
+  </sheetData>
+</worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.setHyperlink("A1", "https://example.com", { text: "Open", tooltip: "Go" });
+  sheet.setHyperlink("B2", "#Sheet2!A1");
+
+  assert.deepEqual(sheet.getHyperlinks(), [
+    { address: "A1", target: "https://example.com", tooltip: "Go", type: "external" },
+    { address: "B2", target: "#Sheet2!A1", tooltip: null, type: "internal" },
+  ]);
+  assert.equal(sheet.getCell("A1"), "Open");
+
+  let sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  let relsXml = entryText(workbook.toEntries(), "xl/worksheets/_rels/sheet1.xml.rels");
+  assert.match(
+    sheetXml,
+    /<hyperlinks><hyperlink ref="A1" r:id="rId1" tooltip="Go"\/><hyperlink ref="B2" location="#Sheet2!A1"\/><\/hyperlinks>/,
+  );
+  assert.match(
+    relsXml,
+    /<Relationship Id="rId1" Type="http:\/\/schemas\.openxmlformats\.org\/officeDocument\/2006\/relationships\/hyperlink" Target="https:\/\/example\.com" TargetMode="External"\/>/,
+  );
+
+  sheet.setHyperlink("A1", "#Sheet2!B3");
+
+  assert.deepEqual(sheet.getHyperlinks(), [
+    { address: "A1", target: "#Sheet2!B3", tooltip: null, type: "internal" },
+    { address: "B2", target: "#Sheet2!A1", tooltip: null, type: "internal" },
+  ]);
+
+  sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  relsXml = entryText(workbook.toEntries(), "xl/worksheets/_rels/sheet1.xml.rels");
+  assert.match(
+    sheetXml,
+    /<hyperlinks><hyperlink ref="A1" location="#Sheet2!B3"\/><hyperlink ref="B2" location="#Sheet2!A1"\/><\/hyperlinks>/,
+  );
+  assert.doesNotMatch(relsXml, /relationships\/hyperlink/);
+
+  sheet.removeHyperlink("A1");
+
+  assert.deepEqual(sheet.getHyperlinks(), [
+    { address: "B2", target: "#Sheet2!A1", tooltip: null, type: "internal" },
+  ]);
+
+  sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.match(sheetXml, /<hyperlinks><hyperlink ref="B2" location="#Sheet2!A1"\/><\/hyperlinks>/);
+
+  sheet.removeHyperlink("B2");
+
+  sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.doesNotMatch(sheetXml, /<hyperlinks>/);
+  assert.deepEqual(sheet.getHyperlinks(), []);
+});
+
 test("workbook defined name APIs read, write, and delete global and local names", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = replaceEntryText(

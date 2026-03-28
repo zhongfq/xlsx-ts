@@ -1,5 +1,5 @@
 import { Cell } from "./cell.js";
-import type { CellType, CellValue, SetFormulaOptions } from "./types.js";
+import type { CellType, CellValue, Hyperlink, SetFormulaOptions, SetHyperlinkOptions } from "./types.js";
 import { XlsxError } from "./errors.js";
 import type { Workbook } from "./workbook.js";
 import { basenamePosix, dirnamePosix, resolvePosix } from "./utils/path.js";
@@ -271,6 +271,68 @@ export class Sheet {
     }
 
     return tables;
+  }
+
+  getHyperlinks(): Hyperlink[] {
+    return parseSheetHyperlinks(this.getSheetIndex().xml, parseHyperlinkRelationshipTargets(this.readSheetRelationshipsXml()));
+  }
+
+  setHyperlink(address: string, target: string, options: SetHyperlinkOptions = {}): void {
+    const normalizedAddress = normalizeCellAddress(address);
+    if (options.text !== undefined) {
+      this.setCell(normalizedAddress, options.text);
+    }
+
+    const currentRelationshipId = getHyperlinkRelationshipId(this.getSheetIndex().xml, normalizedAddress);
+    let relationshipsXml = this.readSheetRelationshipsXml();
+    let relationshipId: string | null = currentRelationshipId;
+
+    if (target.startsWith("#")) {
+      if (currentRelationshipId) {
+        relationshipsXml = removeRelationshipById(relationshipsXml, currentRelationshipId);
+      }
+
+      this.writeSheetXml(
+        upsertHyperlinkInSheetXml(
+          this.getSheetIndex().xml,
+          buildInternalHyperlinkXml(normalizedAddress, target, options.tooltip),
+          normalizedAddress,
+        ),
+      );
+      this.writeSheetRelationshipsXml(relationshipsXml);
+      return;
+    }
+
+    relationshipId ??= getNextRelationshipIdFromXml(relationshipsXml);
+    relationshipsXml = upsertRelationship(
+      relationshipsXml,
+      relationshipId,
+      HYPERLINK_RELATIONSHIP_TYPE,
+      target,
+      "External",
+    );
+    this.writeSheetXml(
+      upsertHyperlinkInSheetXml(
+        this.getSheetIndex().xml,
+        buildExternalHyperlinkXml(normalizedAddress, relationshipId, options.tooltip),
+        normalizedAddress,
+      ),
+    );
+    this.writeSheetRelationshipsXml(relationshipsXml);
+  }
+
+  removeHyperlink(address: string): void {
+    const normalizedAddress = normalizeCellAddress(address);
+    const currentRelationshipId = getHyperlinkRelationshipId(this.getSheetIndex().xml, normalizedAddress);
+    const nextSheetXml = removeHyperlinkFromSheetXml(this.getSheetIndex().xml, normalizedAddress);
+
+    if (nextSheetXml !== this.getSheetIndex().xml) {
+      this.writeSheetXml(nextSheetXml);
+    }
+
+    if (currentRelationshipId) {
+      this.writeSheetRelationshipsXml(removeRelationshipById(this.readSheetRelationshipsXml(), currentRelationshipId));
+    }
   }
 
   addTable(
@@ -2549,6 +2611,169 @@ function removeTablePartsFromSheetXml(sheetXml: string, relationshipIds: string[
   );
 }
 
+function parseSheetHyperlinks(
+  sheetXml: string,
+  relationshipTargets: Map<string, string>,
+): Hyperlink[] {
+  return Array.from(sheetXml.matchAll(/<hyperlink\b([^>]*?)\/>/g), (match) => {
+    const attributesSource = match[1];
+    const address = getXmlAttr(attributesSource, "ref");
+    const relationshipId = getXmlAttr(attributesSource, "r:id");
+    const location = getXmlAttr(attributesSource, "location");
+    const tooltip = getXmlAttr(attributesSource, "tooltip") ?? null;
+
+    if (!address) {
+      return null;
+    }
+
+    if (relationshipId) {
+      const target = relationshipTargets.get(relationshipId);
+      if (!target) {
+        return null;
+      }
+
+      return {
+        address: normalizeCellAddress(address),
+        target,
+        tooltip,
+        type: "external" as const,
+      };
+    }
+
+    if (!location) {
+      return null;
+    }
+
+    return {
+      address: normalizeCellAddress(address),
+      target: location,
+      tooltip,
+      type: "internal" as const,
+    };
+  }).filter((hyperlink): hyperlink is Hyperlink => hyperlink !== null);
+}
+
+function parseHyperlinkRelationshipTargets(relationshipsXml: string): Map<string, string> {
+  const targets = new Map<string, string>();
+
+  for (const match of relationshipsXml.matchAll(/<Relationship\b([^>]*?)\/>/g)) {
+    const attributesSource = match[1];
+    const relationshipId = getXmlAttr(attributesSource, "Id");
+    const type = getXmlAttr(attributesSource, "Type");
+    const target = getXmlAttr(attributesSource, "Target");
+
+    if (!relationshipId || !type || !target || type !== HYPERLINK_RELATIONSHIP_TYPE) {
+      continue;
+    }
+
+    targets.set(relationshipId, decodeXmlText(target));
+  }
+
+  return targets;
+}
+
+function getHyperlinkRelationshipId(sheetXml: string, address: string): string | null {
+  const normalizedAddress = normalizeCellAddress(address);
+
+  for (const match of sheetXml.matchAll(/<hyperlink\b([^>]*?)\/>/g)) {
+    const attributesSource = match[1];
+    const ref = getXmlAttr(attributesSource, "ref");
+    if (!ref || normalizeCellAddress(ref) !== normalizedAddress) {
+      continue;
+    }
+
+    return getXmlAttr(attributesSource, "r:id") ?? null;
+  }
+
+  return null;
+}
+
+function buildInternalHyperlinkXml(address: string, location: string, tooltip?: string): string {
+  const attributes: Array<[string, string]> = [["ref", address], ["location", location]];
+  if (tooltip) {
+    attributes.push(["tooltip", tooltip]);
+  }
+
+  return `<hyperlink ${serializeAttributes(attributes)}/>`;
+}
+
+function buildExternalHyperlinkXml(address: string, relationshipId: string, tooltip?: string): string {
+  const attributes: Array<[string, string]> = [["ref", address], ["r:id", relationshipId]];
+  if (tooltip) {
+    attributes.push(["tooltip", tooltip]);
+  }
+
+  return `<hyperlink ${serializeAttributes(attributes)}/>`;
+}
+
+function upsertHyperlinkInSheetXml(sheetXml: string, hyperlinkXml: string, address: string): string {
+  const normalizedAddress = normalizeCellAddress(address);
+  const hyperlinksMatch = sheetXml.match(/<hyperlinks\b[^>]*>([\s\S]*?)<\/hyperlinks>/);
+
+  const hyperlinks = (hyperlinksMatch
+    ? Array.from(hyperlinksMatch[1].matchAll(/<hyperlink\b([^>]*?)\/>/g), (match) => {
+        const attributesSource = match[1];
+        const ref = getXmlAttr(attributesSource, "ref");
+        return {
+          address: ref ? normalizeCellAddress(ref) : "",
+          xml: match[0],
+        };
+      })
+    : []
+  ).filter((hyperlink) => hyperlink.address !== normalizedAddress);
+  hyperlinks.push({ address: normalizedAddress, xml: hyperlinkXml });
+  hyperlinks.sort((left, right) => compareCellAddresses(left.address, right.address));
+
+  const nextHyperlinksXml = `<hyperlinks>${hyperlinks.map((hyperlink) => hyperlink.xml).join("")}</hyperlinks>`;
+
+  if (hyperlinksMatch && hyperlinksMatch.index !== undefined) {
+    return (
+      sheetXml.slice(0, hyperlinksMatch.index) +
+      nextHyperlinksXml +
+      sheetXml.slice(hyperlinksMatch.index + hyperlinksMatch[0].length)
+    );
+  }
+
+  const closingTag = "</worksheet>";
+  const insertionIndex = sheetXml.indexOf(closingTag);
+  if (insertionIndex === -1) {
+    throw new XlsxError("Worksheet is missing </worksheet>");
+  }
+
+  return sheetXml.slice(0, insertionIndex) + nextHyperlinksXml + sheetXml.slice(insertionIndex);
+}
+
+function removeHyperlinkFromSheetXml(sheetXml: string, address: string): string {
+  const normalizedAddress = normalizeCellAddress(address);
+  const hyperlinksMatch = sheetXml.match(/<hyperlinks\b[^>]*>([\s\S]*?)<\/hyperlinks>/);
+  if (!hyperlinksMatch || hyperlinksMatch.index === undefined) {
+    return sheetXml;
+  }
+
+  const keptHyperlinks = Array.from(
+    hyperlinksMatch[1].matchAll(/<hyperlink\b([^>]*?)\/>/g),
+    (match) => {
+      const attributesSource = match[1];
+      const ref = getXmlAttr(attributesSource, "ref");
+      return {
+        address: ref ? normalizeCellAddress(ref) : "",
+        xml: match[0],
+      };
+    },
+  ).filter((hyperlink) => hyperlink.address !== normalizedAddress);
+
+  const nextHyperlinksXml =
+    keptHyperlinks.length === 0
+      ? ""
+      : `<hyperlinks>${keptHyperlinks.map((hyperlink) => hyperlink.xml).join("")}</hyperlinks>`;
+
+  return (
+    sheetXml.slice(0, hyperlinksMatch.index) +
+    nextHyperlinksXml +
+    sheetXml.slice(hyperlinksMatch.index + hyperlinksMatch[0].length)
+  );
+}
+
 function getSheetRelationshipsPath(sheetPath: string): string {
   return `${dirnamePosix(sheetPath)}/_rels/${basenamePosix(sheetPath)}.rels`;
 }
@@ -2656,6 +2881,7 @@ function appendRelationship(
   relationshipId: string,
   type: string,
   target: string,
+  targetMode?: string,
 ): string {
   const closingTag = "</Relationships>";
   const insertionIndex = relationshipsXml.indexOf(closingTag);
@@ -2663,9 +2889,32 @@ function appendRelationship(
     throw new XlsxError("Worksheet relationships file is missing </Relationships>");
   }
 
-  const relationshipXml =
-    `<Relationship Id="${relationshipId}" Type="${escapeXmlText(type)}" Target="${escapeXmlText(target)}"/>`;
+  const attributes: Array<[string, string]> = [
+    ["Id", relationshipId],
+    ["Type", type],
+    ["Target", target],
+  ];
+  if (targetMode) {
+    attributes.push(["TargetMode", targetMode]);
+  }
+
+  const relationshipXml = `<Relationship ${serializeAttributes(attributes)}/>`;
   return relationshipsXml.slice(0, insertionIndex) + relationshipXml + relationshipsXml.slice(insertionIndex);
+}
+
+function upsertRelationship(
+  relationshipsXml: string,
+  relationshipId: string,
+  type: string,
+  target: string,
+  targetMode?: string,
+): string {
+  const nextRelationshipXml = buildRelationshipXml(relationshipId, type, target, targetMode);
+  const relationshipRegex = new RegExp(`<Relationship\\b[^>]*\\bId="${escapeRegex(relationshipId)}"[^>]*/>`);
+
+  return relationshipRegex.test(relationshipsXml)
+    ? relationshipsXml.replace(relationshipRegex, nextRelationshipXml)
+    : appendRelationship(relationshipsXml, relationshipId, type, target, targetMode);
 }
 
 function removeRelationshipById(relationshipsXml: string, relationshipId: string): string {
@@ -2673,6 +2922,24 @@ function removeRelationshipById(relationshipsXml: string, relationshipId: string
     new RegExp(`<Relationship\\b[^>]*\\bId="${escapeRegex(relationshipId)}"[^>]*/>`),
     "",
   );
+}
+
+function buildRelationshipXml(
+  relationshipId: string,
+  type: string,
+  target: string,
+  targetMode?: string,
+): string {
+  const attributes: Array<[string, string]> = [
+    ["Id", relationshipId],
+    ["Type", type],
+    ["Target", target],
+  ];
+  if (targetMode) {
+    attributes.push(["TargetMode", targetMode]);
+  }
+
+  return `<Relationship ${serializeAttributes(attributes)}/>`;
 }
 
 function makeRelativeSheetRelationshipTarget(sheetPath: string, targetPath: string): string {
@@ -2757,6 +3024,12 @@ function compareRangeRefs(left: string, right: string): number {
     leftRange.endRow - rightRange.endRow ||
     leftRange.endColumn - rightRange.endColumn
   );
+}
+
+function compareCellAddresses(left: string, right: string): number {
+  const leftCell = splitCellAddress(left);
+  const rightCell = splitCellAddress(right);
+  return leftCell.rowNumber - rightCell.rowNumber || leftCell.columnNumber - rightCell.columnNumber;
 }
 
 function updateDimensionRef(sheetIndex: SheetIndex): string {
@@ -2846,6 +3119,8 @@ const WORKSHEET_CELL_REF_ATTRIBUTES: Array<[string, string]> = [
 ];
 const TABLE_CONTENT_TYPE =
   "application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml";
+const HYPERLINK_RELATIONSHIP_TYPE =
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
 const EMPTY_RELATIONSHIPS_XML =
   `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
   `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>`;

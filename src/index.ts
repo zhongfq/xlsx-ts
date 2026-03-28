@@ -6,6 +6,8 @@ export type {
   CellType,
   CellValue,
   DefinedName,
+  Hyperlink,
   SetDefinedNameOptions,
   SetFormulaOptions,
+  SetHyperlinkOptions,
 } from "./types.js";

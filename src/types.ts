@@ -13,10 +13,22 @@ export interface DefinedName {
   value: string;
 }
 
+export interface Hyperlink {
+  address: string;
+  target: string;
+  tooltip: string | null;
+  type: "external" | "internal";
+}
+
 export interface SetFormulaOptions {
   cachedValue?: CellValue;
 }
 
 export interface SetDefinedNameOptions {
   scope?: string;
+}
+
+export interface SetHyperlinkOptions {
+  text?: string;
+  tooltip?: string;
 }

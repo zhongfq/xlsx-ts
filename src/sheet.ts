@@ -92,6 +92,16 @@ export class Sheet {
     return this.readCellSnapshot(resolveCellAddress(addressOrRowNumber, column)).value;
   }
 
+  getStyleId(address: string): number | null;
+  getStyleId(rowNumber: number, column: number | string): number | null;
+  getStyleId(addressOrRowNumber: string | number, column?: number | string): number | null {
+    if (typeof addressOrRowNumber === "number") {
+      return this.readCellSnapshotByIndexes(addressOrRowNumber, column).styleId;
+    }
+
+    return this.readCellSnapshot(resolveCellAddress(addressOrRowNumber, column)).styleId;
+  }
+
   rename(name: string): void {
     this.workbook.renameSheet(this.name, name);
   }
@@ -689,6 +699,32 @@ export class Sheet {
     );
   }
 
+  setStyleId(address: string, styleId: number | null): void;
+  setStyleId(rowNumber: number, column: number | string, styleId: number | null): void;
+  setStyleId(
+    addressOrRowNumber: string | number,
+    columnOrStyleId: number | string | null,
+    styleId?: number | null,
+  ): void {
+    const normalizedAddress = resolveCellAddress(
+      addressOrRowNumber,
+      typeof addressOrRowNumber === "number" ? (columnOrStyleId as number | string) : undefined,
+    );
+    const nextStyleId = resolveSetStyleId(addressOrRowNumber, columnOrStyleId, styleId);
+    const index = this.getSheetIndex();
+    const existingCell = index.cells.get(normalizedAddress);
+
+    this.writeCellXml(
+      normalizedAddress,
+      buildStyledCellXml(
+        normalizedAddress,
+        nextStyleId,
+        existingCell?.attributesSource,
+        existingCell ? index.xml.slice(existingCell.start, existingCell.end) : undefined,
+      ),
+    );
+  }
+
   deleteCell(address: string): void;
   deleteCell(rowNumber: number, column: number | string): void;
   deleteCell(addressOrRowNumber: string | number, column?: number | string): void {
@@ -1191,6 +1227,28 @@ function buildValueCellXml(address: string, value: CellValue, existingAttributes
   return `<c ${serializedAttributes}><v>${String(value)}</v></c>`;
 }
 
+function buildStyledCellXml(
+  address: string,
+  styleId: number | null,
+  existingAttributesSource?: string,
+  existingCellXml?: string,
+): string {
+  const serializedAttributes = serializeAttributes(
+    buildCellAttributesWithStyle(address, styleId, existingAttributesSource),
+  );
+
+  if (!existingCellXml || existingCellXml.endsWith("/>")) {
+    return `<c ${serializedAttributes}/>`;
+  }
+
+  const openTagEnd = existingCellXml.indexOf(">");
+  if (openTagEnd === -1) {
+    throw new XlsxError("Cell XML is missing opening tag");
+  }
+
+  return `<c ${serializedAttributes}>${existingCellXml.slice(openTagEnd + 1)}`;
+}
+
 function buildFormulaCellXml(
   address: string,
   formula: string,
@@ -1213,6 +1271,23 @@ function buildFormulaCellXml(
   const valueXml = buildFormulaValueXml(cachedValue);
 
   return `<c ${serializedAttributes}><f>${escapeXmlText(formula)}</f>${valueXml}</c>`;
+}
+
+function buildCellAttributesWithStyle(
+  address: string,
+  styleId: number | null,
+  existingAttributesSource = "",
+): Array<[string, string]> {
+  const attributes = parseAttributes(existingAttributesSource);
+  const preserved = attributes.filter(([name]) => name !== "r" && name !== "s");
+  const nextAttributes: Array<[string, string]> = [["r", address]];
+
+  if (styleId !== null) {
+    nextAttributes.push(["s", String(styleId)]);
+  }
+
+  nextAttributes.push(...preserved);
+  return nextAttributes;
 }
 
 function buildFormulaValueXml(value: CellValue): string {
@@ -3606,6 +3681,23 @@ function assertFreezeSplit(columnCount: number, rowCount: number): void {
   if (columnCount === 0 && rowCount === 0) {
     throw new XlsxError("Freeze pane requires at least one frozen row or column");
   }
+}
+
+function assertStyleId(styleId: number | null): void {
+  if (styleId !== null && (!Number.isInteger(styleId) || styleId < 0)) {
+    throw new XlsxError(`Invalid style id: ${styleId}`);
+  }
+}
+
+function resolveSetStyleId(
+  addressOrRowNumber: string | number,
+  columnOrStyleId: number | string | null,
+  styleId?: number | null,
+): number | null {
+  const nextStyleId =
+    typeof addressOrRowNumber === "number" ? (styleId ?? null) : (columnOrStyleId as number | null);
+  assertStyleId(nextStyleId);
+  return nextStyleId;
 }
 
 function compareRangeRefs(left: string, right: string): number {

@@ -165,6 +165,50 @@ test("cell APIs accept 1-based row and column indexes", async () => {
   assert.equal(sheet.getCell(3, 2), 3);
 });
 
+test("style id APIs read and write style indexes by address and indexes", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" s="1" t="inlineStr"><is><t>Hello</t></is></c>
+      <c r="B1" s="2"><f>SUM(1,2)</f><v>3</v></c>
+    </row>
+  </sheetData>
+</worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+  const cell = sheet.cell("A1");
+
+  assert.equal(sheet.getStyleId("A1"), 1);
+  assert.equal(sheet.getStyleId(1, 2), 2);
+  assert.equal(cell.styleId, 1);
+
+  sheet.setStyleId(1, 1, 5);
+  sheet.setStyleId("B1", 6);
+  sheet.setStyleId(2, 3, 7);
+
+  assert.equal(sheet.getStyleId("A1"), 5);
+  assert.equal(sheet.getStyleId(1, 2), 6);
+  assert.equal(sheet.getStyleId("C2"), 7);
+  assert.equal(cell.styleId, 5);
+  assert.equal(sheet.getCell("A1"), "Hello");
+  assert.equal(sheet.getFormula("B1"), "SUM(1,2)");
+  assert.equal(sheet.getCell("B1"), 3);
+
+  cell.setStyleId(null);
+  assert.equal(sheet.getStyleId("A1"), null);
+
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.match(sheetXml, /<c r="A1" t="inlineStr"><is><t>Hello<\/t><\/is><\/c>/);
+  assert.match(sheetXml, /<c r="B1" s="6"><f>SUM\(1,2\)<\/f><v>3<\/v><\/c>/);
+  assert.match(sheetXml, /<c r="C2" s="7"\/>/);
+});
+
 test("range APIs read and write rectangular values", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = await loadFixtureEntries(fixtureDir);

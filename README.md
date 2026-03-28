@@ -71,6 +71,8 @@
 - `sheet.rename(name)`
 - `sheet.getCell(address)`
 - `sheet.getCell(rowNumber, column)`
+- `sheet.getStyleId(address)`
+- `sheet.getStyleId(rowNumber, column)`
 - `sheet.getCellEntries()`
 - `sheet.iterCellEntries()`
 - `sheet.rowCount`
@@ -104,6 +106,8 @@
 - `sheet.removeDataValidation(range)`
 - `sheet.setCell(address, value)`
 - `sheet.setCell(rowNumber, column, value)`
+- `sheet.setStyleId(address, styleId)`
+- `sheet.setStyleId(rowNumber, column, styleId)`
 - `sheet.deleteCell(address)`
 - `sheet.deleteCell(rowNumber, column)`
 - `sheet.deleteRow(row, count?)`
@@ -137,6 +141,7 @@ const workbook = await Workbook.open("input.xlsx");
 const sheet = workbook.getSheet("Sheet1");
 const scoreCell = sheet.cell("B2");
 const scoreValue = sheet.getCell(2, 2);
+const scoreStyleId = sheet.getStyleId(2, 2);
 const detailSheet = workbook.addSheet("Detail");
 const activeSheet = workbook.getActiveSheet();
 
@@ -159,6 +164,7 @@ sheet.freezePane(1, 1);
 sheet.setSelection("B2", "B2:C4");
 sheet.setDataValidation("B2:B100", { type: "whole", operator: "between", formula1: "0", formula2: "100" });
 sheet.setCell(3, 2, 98);
+sheet.setStyleId(3, 2, scoreStyleId);
 sheet.setCell("A1", "Hello");
 sheet.deleteRow(8);
 sheet.deleteColumn("G");
@@ -215,6 +221,7 @@ await workbook.save("output.xlsx");
 - `sheet.rowCount` / `sheet.columnCount` 当前表示已用区域的最大行号 / 最大列号；空表返回 `0`
 - `sheet.getCellEntries()` / `iterCellEntries()` / `getRowEntries()` / `getColumnEntries()` 会按 worksheet 中真实存在的 `<c>` 节点返回带地址、行列号、类型、样式索引和值的对象，适合大表和稀疏表遍历
 - `sheet.deleteCell()` 会真正移除 worksheet 里的 `<c>` 节点；如果你只是想保留样式占位但把值清空，继续用 `setCell(..., null)`
+- `sheet.getStyleId()` / `setStyleId()` 当前读写单元格上的 `s="..."` 样式索引；支持 `A1` 和 `(rowNumber, column)` 两种调用，但还不直接编辑 `styles.xml`
 - `sheet.getFreezePane()` / `freezePane()` / `unfreezePane()` 当前维护 worksheet `sheetViews/sheetView/pane`；插删行列时 `topLeftCell` 也会继续跟随更新
 - `sheet.getSelection()` / `setSelection()` 当前读写 worksheet `sheetViews/sheetView/selection`；冻结窗格存在时会优先落在当前 active pane 对应的 selection 上
 - 每次写入后会重建该表索引，保证后续读取拿到的是最新结果

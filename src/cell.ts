@@ -45,6 +45,10 @@ export class Cell {
     this.sheet.setCell(this.address, value);
   }
 
+  setStyleId(styleId: number | null): void {
+    this.sheet.setStyleId(this.address, styleId);
+  }
+
   private getSnapshot(): CellSnapshot {
     const revision = this.sheet.getRevision();
     if (this.cachedSnapshot && this.cachedRevision === revision) {

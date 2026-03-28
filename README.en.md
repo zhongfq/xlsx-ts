@@ -76,6 +76,8 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `sheet.rename(name)`
 - `sheet.getCell(address)`
 - `sheet.getCell(rowNumber, column)`
+- `sheet.getStyleId(address)`
+- `sheet.getStyleId(rowNumber, column)`
 - `sheet.getCellEntries()`
 - `sheet.iterCellEntries()`
 - `sheet.rowCount`
@@ -109,6 +111,8 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `sheet.removeDataValidation(range)`
 - `sheet.setCell(address, value)`
 - `sheet.setCell(rowNumber, column, value)`
+- `sheet.setStyleId(address, styleId)`
+- `sheet.setStyleId(rowNumber, column, styleId)`
 - `sheet.deleteCell(address)`
 - `sheet.deleteCell(rowNumber, column)`
 - `sheet.deleteRow(row, count?)`
@@ -142,6 +146,7 @@ const workbook = await Workbook.open("input.xlsx");
 const sheet = workbook.getSheet("Sheet1");
 const scoreCell = sheet.cell("B2");
 const scoreValue = sheet.getCell(2, 2);
+const scoreStyleId = sheet.getStyleId(2, 2);
 const detailSheet = workbook.addSheet("Detail");
 const activeSheet = workbook.getActiveSheet();
 
@@ -164,6 +169,7 @@ sheet.freezePane(1, 1);
 sheet.setSelection("B2", "B2:C4");
 sheet.setDataValidation("B2:B100", { type: "whole", operator: "between", formula1: "0", formula2: "100" });
 sheet.setCell(3, 2, 98);
+sheet.setStyleId(3, 2, scoreStyleId);
 sheet.setCell("A1", "Hello");
 sheet.deleteRow(8);
 sheet.deleteColumn("G");
@@ -220,6 +226,7 @@ Notes:
 - `sheet.rowCount` and `sheet.columnCount` currently mean the maximum used row number and maximum used column number. Empty sheets return `0`.
 - `sheet.getCellEntries()`, `iterCellEntries()`, `getRowEntries()`, and `getColumnEntries()` expose the real worksheet `<c>` nodes with address, row/column indexes, type, style id, and value, which is useful for large or sparse sheet iteration.
 - `sheet.deleteCell()` removes the worksheet `<c>` node entirely; if you want to keep a styled placeholder but clear the value, continue using `setCell(..., null)`.
+- `sheet.getStyleId()` and `setStyleId()` currently read and write the cell-level `s="..."` style index; both `A1` and `(rowNumber, column)` calls are supported, but `styles.xml` is not edited directly yet.
 - `sheet.getFreezePane()`, `freezePane()`, and `unfreezePane()` currently manage worksheet `sheetViews/sheetView/pane`; `topLeftCell` keeps tracking row and column insert/delete operations.
 - `sheet.getSelection()` and `setSelection()` currently read and write worksheet `sheetViews/sheetView/selection`; when a frozen pane exists, they target the selection for the current active pane.
 - After each write, the sheet index is rebuilt so later reads always see the latest content.

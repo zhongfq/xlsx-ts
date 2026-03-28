@@ -70,12 +70,15 @@
 - `sheet.getRange(range)`
 - `sheet.getUsedRange()`
 - `sheet.getMergedRanges()`
+- `sheet.getAutoFilter()`
 - `sheet.getTables()`
 - `sheet.getHyperlinks()`
 - `sheet.addTable(range, options?)`
 - `sheet.removeTable(name)`
 - `sheet.setHyperlink(address, target, options?)`
 - `sheet.removeHyperlink(address)`
+- `sheet.setAutoFilter(range)`
+- `sheet.removeAutoFilter()`
 - `sheet.setCell(address, value)`
 - `sheet.deleteRow(row, count?)`
 - `sheet.deleteColumn(column, count?)`
@@ -116,6 +119,7 @@ console.log(sheet.getHyperlinks());
 sheet.addTable("A1:B10", { name: "Scores" });
 sheet.setHyperlink("A1", "https://example.com", { text: "Hello", tooltip: "Open link" });
 sheet.setHyperlink("B2", "#Summary!A1");
+sheet.setAutoFilter("A1:F20");
 sheet.setCell("A1", "Hello");
 sheet.deleteRow(8);
 sheet.deleteColumn("G");
@@ -148,6 +152,7 @@ sheet.setRange("B2", [
 sheet.addMergedRange("D1:E1");
 sheet.setFormula("B1", "SUM(1,2)", { cachedValue: 3 });
 sheet.removeHyperlink("B2");
+sheet.removeAutoFilter();
 sheet.removeTable("Scores");
 detailSheet.setCell("A1", "created");
 console.log(workbook.getDefinedNames(), workbook.getDefinedName("LocalScore", "Summary"));
@@ -170,6 +175,7 @@ await workbook.save("output.xlsx");
 - `insertColumn()` 当前会同步更新本 sheet 的单元格坐标、公式引用、合并区域、`dimension`、常见 `ref/sqref` 属性、`definedNames`，以及其它 sheet 里显式引用它的公式
 - `sheet.getTables()` 当前可以读取已有 table 的名称、显示名、范围和部件路径
 - `sheet.getHyperlinks()` 当前可以读取当前 sheet 上的内部和外部超链接；外部链接会解析 sheet rel 里的目标地址
+- `sheet.getAutoFilter()` / `sheet.setAutoFilter()` / `sheet.removeAutoFilter()` 当前支持读写 worksheet 顶层 `autoFilter`，移除时会一并清掉顶层 `sortState`
 - `sheet.addTable()` 当前会创建最基础的 table part、sheet rel、`[Content_Types].xml` override 和 table XML；列名默认取范围首行，空列名会回退到 `ColumnN`
 - `sheet.removeTable()` 当前会同步移除当前 sheet 的 `tableParts`、sheet rel、table XML 和对应的 content type override
 - `sheet.setHyperlink()` / `sheet.removeHyperlink()` 当前支持维护 worksheet `<hyperlinks>` 与外部链接对应的 sheet rel，内部链接 target 用 `#Sheet1!A1` 这种格式

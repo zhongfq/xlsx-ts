@@ -1222,6 +1222,58 @@ test("sheet hyperlink APIs read, write, replace, and delete hyperlinks", async (
   assert.deepEqual(sheet.getHyperlinks(), []);
 });
 
+test("sheet autoFilter APIs read, write, shift, and remove filters", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>2</v></c><c r="C1"><v>3</v></c></row>
+    <row r="2"><c r="A2"><v>4</v></c><c r="B2"><v>5</v></c><c r="C2"><v>6</v></c></row>
+  </sheetData>
+  <mergeCells count="1"><mergeCell ref="E1:F1"/></mergeCells>
+</worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  assert.equal(sheet.getAutoFilter(), null);
+
+  sheet.setAutoFilter("A1:C2");
+  assert.equal(sheet.getAutoFilter(), "A1:C2");
+
+  let sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.match(
+    sheetXml,
+    /<\/sheetData>\s*<autoFilter ref="A1:C2"\/><mergeCells count="1"><mergeCell ref="E1:F1"\/><\/mergeCells>/,
+  );
+
+  sheet.insertColumn("B");
+  assert.equal(sheet.getAutoFilter(), "A1:D2");
+
+  sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.match(sheetXml, /<autoFilter ref="A1:D2"\/>/);
+
+  workbook.writeEntryText(
+    "xl/worksheets/sheet1.xml",
+    sheetXml.replace(
+      /<autoFilter ref="A1:D2"\/>/,
+      `<autoFilter ref="A1:D2"/><sortState ref="A2:D2"/>`,
+    ),
+  );
+
+  assert.equal(sheet.getAutoFilter(), "A1:D2");
+
+  sheet.removeAutoFilter();
+
+  sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.equal(sheet.getAutoFilter(), null);
+  assert.doesNotMatch(sheetXml, /<autoFilter\b/);
+  assert.doesNotMatch(sheetXml, /<sortState\b/);
+});
+
 test("workbook defined name APIs read, write, and delete global and local names", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = replaceEntryText(

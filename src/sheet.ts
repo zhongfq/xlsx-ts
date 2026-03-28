@@ -248,6 +248,10 @@ export class Sheet {
     return parseMergedRanges(this.getSheetIndex().xml);
   }
 
+  getAutoFilter(): string | null {
+    return parseSheetAutoFilter(this.getSheetIndex().xml);
+  }
+
   getTables(): Array<{ name: string; displayName: string; range: string; path: string }> {
     const tables: Array<{ name: string; displayName: string; range: string; path: string }> = [];
 
@@ -332,6 +336,23 @@ export class Sheet {
 
     if (currentRelationshipId) {
       this.writeSheetRelationshipsXml(removeRelationshipById(this.readSheetRelationshipsXml(), currentRelationshipId));
+    }
+  }
+
+  setAutoFilter(range: string): void {
+    const normalizedRange = normalizeRangeRef(range);
+    const nextSheetXml = upsertAutoFilterInSheetXml(this.getSheetIndex().xml, normalizedRange);
+
+    if (nextSheetXml !== this.getSheetIndex().xml) {
+      this.writeSheetXml(nextSheetXml);
+    }
+  }
+
+  removeAutoFilter(): void {
+    const nextSheetXml = removeAutoFilterFromSheetXml(this.getSheetIndex().xml);
+
+    if (nextSheetXml !== this.getSheetIndex().xml) {
+      this.writeSheetXml(nextSheetXml);
     }
   }
 
@@ -2611,6 +2632,39 @@ function removeTablePartsFromSheetXml(sheetXml: string, relationshipIds: string[
   );
 }
 
+function parseSheetAutoFilter(sheetXml: string): string | null {
+  const autoFilterMatch = sheetXml.match(/<autoFilter\b([^>]*?)\/>/);
+  if (!autoFilterMatch) {
+    return null;
+  }
+
+  const ref = getXmlAttr(autoFilterMatch[1], "ref");
+  return ref ? normalizeRangeRef(ref) : null;
+}
+
+function upsertAutoFilterInSheetXml(sheetXml: string, range: string): string {
+  const normalizedRange = normalizeRangeRef(range);
+  const autoFilterXml = `<autoFilter ref="${normalizedRange}"/>`;
+  const autoFilterMatch = sheetXml.match(/<autoFilter\b[^>]*\/>/);
+
+  if (autoFilterMatch && autoFilterMatch.index !== undefined) {
+    return (
+      sheetXml.slice(0, autoFilterMatch.index) +
+      autoFilterXml +
+      sheetXml.slice(autoFilterMatch.index + autoFilterMatch[0].length)
+    );
+  }
+
+  const insertionIndex = findWorksheetChildInsertionIndex(sheetXml, AUTO_FILTER_FOLLOWING_TAGS);
+  return sheetXml.slice(0, insertionIndex) + autoFilterXml + sheetXml.slice(insertionIndex);
+}
+
+function removeAutoFilterFromSheetXml(sheetXml: string): string {
+  return sheetXml
+    .replace(/<autoFilter\b[^>]*\/>/, "")
+    .replace(/<sortState\b[^>]*\/>/, "");
+}
+
 function parseSheetHyperlinks(
   sheetXml: string,
   relationshipTargets: Map<string, string>,
@@ -2989,6 +3043,33 @@ function appendTablePart(sheetXml: string, relationshipId: string): string {
   );
 }
 
+function findWorksheetChildInsertionIndex(sheetXml: string, followingTagNames: string[]): number {
+  let insertionIndex = -1;
+
+  for (const tagName of followingTagNames) {
+    const match = sheetXml.match(new RegExp(`<${escapeRegex(tagName)}\\b`));
+    if (!match || match.index === undefined) {
+      continue;
+    }
+
+    if (insertionIndex === -1 || match.index < insertionIndex) {
+      insertionIndex = match.index;
+    }
+  }
+
+  if (insertionIndex !== -1) {
+    return insertionIndex;
+  }
+
+  const closingTag = "</worksheet>";
+  const closingTagIndex = sheetXml.indexOf(closingTag);
+  if (closingTagIndex === -1) {
+    throw new XlsxError("Worksheet is missing </worksheet>");
+  }
+
+  return closingTagIndex;
+}
+
 function addContentTypeOverride(contentTypesXml: string, partPath: string, contentType: string): string {
   if (new RegExp(`PartName="/${escapeRegex(partPath)}"`).test(contentTypesXml)) {
     return contentTypesXml;
@@ -3121,6 +3202,33 @@ const TABLE_CONTENT_TYPE =
   "application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml";
 const HYPERLINK_RELATIONSHIP_TYPE =
   "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
+const AUTO_FILTER_FOLLOWING_TAGS = [
+  "sortState",
+  "mergeCells",
+  "phoneticPr",
+  "conditionalFormatting",
+  "dataValidations",
+  "hyperlinks",
+  "printOptions",
+  "pageMargins",
+  "pageSetup",
+  "headerFooter",
+  "rowBreaks",
+  "colBreaks",
+  "customProperties",
+  "cellWatches",
+  "ignoredErrors",
+  "smartTags",
+  "drawing",
+  "legacyDrawing",
+  "legacyDrawingHF",
+  "picture",
+  "oleObjects",
+  "controls",
+  "webPublishItems",
+  "tableParts",
+  "extLst",
+];
 const EMPTY_RELATIONSHIPS_XML =
   `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
   `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>`;

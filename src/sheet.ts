@@ -159,6 +159,20 @@ export class Sheet {
     return style ? this.workbook.getFill(style.fillId) : null;
   }
 
+  getBackgroundColor(address: string): string | null;
+  getBackgroundColor(rowNumber: number, column: number | string): string | null;
+  getBackgroundColor(addressOrRowNumber: string | number, column?: number | string): string | null {
+    const fill =
+      typeof addressOrRowNumber === "number"
+        ? this.getFill(addressOrRowNumber, column!)
+        : this.getFill(addressOrRowNumber);
+    if (!fill || fill.patternType !== "solid") {
+      return null;
+    }
+
+    return fill.fgColor?.rgb ?? null;
+  }
+
   getBorder(address: string): CellBorderDefinition | null;
   getBorder(rowNumber: number, column: number | string): CellBorderDefinition | null;
   getBorder(addressOrRowNumber: string | number, column?: number | string): CellBorderDefinition | null {
@@ -297,6 +311,34 @@ export class Sheet {
     });
     this.setStyleId(normalizedAddress, nextStyleId);
     return nextFillId;
+  }
+
+  setBackgroundColor(address: string, color: string | null): number;
+  setBackgroundColor(rowNumber: number, column: number | string, color: string | null): number;
+  setBackgroundColor(
+    addressOrRowNumber: string | number,
+    columnOrColor: number | string | null,
+    color?: string | null,
+  ): number {
+    const nextColor = typeof addressOrRowNumber === "number" ? (color ?? null) : (columnOrColor as string | null);
+    const fillPatch: CellFillPatch =
+      nextColor === null
+        ? {
+            patternType: "none",
+            fgColor: null,
+            bgColor: null,
+          }
+        : {
+            patternType: "solid",
+            fgColor: { rgb: nextColor },
+            bgColor: null,
+          };
+
+    if (typeof addressOrRowNumber === "number") {
+      return this.setFill(addressOrRowNumber, columnOrColor as number | string, fillPatch);
+    }
+
+    return this.setFill(addressOrRowNumber, fillPatch);
   }
 
   setBorder(address: string, patch: CellBorderPatch): number;

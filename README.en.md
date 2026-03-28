@@ -97,6 +97,8 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `sheet.getNumberFormat(rowNumber, column)`
 - `sheet.getBorder(address)`
 - `sheet.getBorder(rowNumber, column)`
+- `sheet.getBackgroundColor(address)`
+- `sheet.getBackgroundColor(rowNumber, column)`
 - `sheet.getFill(address)`
 - `sheet.getFill(rowNumber, column)`
 - `sheet.getFont(address)`
@@ -117,6 +119,8 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `sheet.setNumberFormat(rowNumber, column, formatCode)`
 - `sheet.setBorder(address, patch)`
 - `sheet.setBorder(rowNumber, column, patch)`
+- `sheet.setBackgroundColor(address, color)`
+- `sheet.setBackgroundColor(rowNumber, column, color)`
 - `sheet.setFill(address, patch)`
 - `sheet.setFill(rowNumber, column, patch)`
 - `sheet.setFont(address, patch)`
@@ -280,7 +284,7 @@ await workbook.save("output.xlsx");
 Notes:
 
 - On first read/write access, a sheet scans `sheetData` once and builds indexes for rows and cells.
-- `sheet.cell(address)` returns a reusable `Cell` handle whose parsed value/formula/style-index state is cached by sheet revision. It now also exposes `cell.style`, `cell.alignment`, `cell.font`, `cell.fill`, `cell.border`, `cell.numberFormat`, `cell.setStyle(patch)`, `cell.setAlignment(patch)`, `cell.setFont(patch)`, `cell.setFill(patch)`, `cell.setBorder(patch)`, `cell.setNumberFormat(formatCode)`, and `cell.cloneStyle(patch?)`.
+- `sheet.cell(address)` returns a reusable `Cell` handle whose parsed value/formula/style-index state is cached by sheet revision. It now also exposes `cell.style`, `cell.alignment`, `cell.font`, `cell.fill`, `cell.backgroundColor`, `cell.border`, `cell.numberFormat`, `cell.setStyle(patch)`, `cell.setAlignment(patch)`, `cell.setFont(patch)`, `cell.setFill(patch)`, `cell.setBackgroundColor(color)`, `cell.setBorder(patch)`, `cell.setNumberFormat(formatCode)`, and `cell.cloneStyle(patch?)`.
 - `sheet.cell()`, `getCell()`, `setCell()`, `getFormula()`, and `setFormula()` now support both `A1` addresses and `(rowNumber, column)` calls. Row and column indexes are 1-based.
 - Later `getCell()` and `getFormula()` calls use those indexes directly instead of running a full string match on every read.
 - `sheet.rowCount` and `sheet.columnCount` currently mean the maximum used row number and maximum used column number. Empty sheets return `0`.
@@ -295,6 +299,8 @@ Notes:
 - `sheet.setFont()` and `cell.setFont()` clone the current `fontId`, then clone the current `styleId` with that new font attached, so only the targeted cell changes and other cells sharing the old font/style stay untouched.
 - `sheet.getFill()` resolves the fill definition currently used by the cell.
 - `sheet.setFill()` and `cell.setFill()` clone the current `fillId`, then clone the current `styleId` with that new fill attached, so only the targeted cell changes and other cells sharing the old fill/style stay untouched.
+- `sheet.getBackgroundColor()` and `cell.backgroundColor` are fill-based convenience readers. They return an ARGB value only when the cell uses a `solid` fill with `fgColor.rgb`.
+- `sheet.setBackgroundColor()` and `cell.setBackgroundColor()` are fill-based convenience writers: passing a color writes `solid + fgColor.rgb`, and passing `null` resets the fill to `none`.
 - `sheet.getBorder()` resolves the border definition currently used by the cell.
 - `sheet.setBorder()` and `cell.setBorder()` clone the current `borderId`, then clone the current `styleId` with that new border attached, so only the targeted cell changes and other cells sharing the old border/style stay untouched.
 - `sheet.getNumberFormat()` resolves the number-format definition currently used by the cell, including common builtin format codes.

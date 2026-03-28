@@ -92,6 +92,8 @@
 - `sheet.getNumberFormat(rowNumber, column)`
 - `sheet.getBorder(address)`
 - `sheet.getBorder(rowNumber, column)`
+- `sheet.getBackgroundColor(address)`
+- `sheet.getBackgroundColor(rowNumber, column)`
 - `sheet.getFill(address)`
 - `sheet.getFill(rowNumber, column)`
 - `sheet.getFont(address)`
@@ -112,6 +114,8 @@
 - `sheet.setNumberFormat(rowNumber, column, formatCode)`
 - `sheet.setBorder(address, patch)`
 - `sheet.setBorder(rowNumber, column, patch)`
+- `sheet.setBackgroundColor(address, color)`
+- `sheet.setBackgroundColor(rowNumber, column, color)`
 - `sheet.setFill(address, patch)`
 - `sheet.setFill(rowNumber, column, patch)`
 - `sheet.setFont(address, patch)`
@@ -275,7 +279,7 @@ await workbook.save("output.xlsx");
 说明：
 
 - 同一张工作表首次读写时会扫描一次 `sheetData`，建立单元格与行的位置索引
-- `sheet.cell(address)` 返回可复用的 `Cell` 句柄，值/公式/样式索引会按工作表 revision 缓存；现在也可以通过 `cell.style` / `cell.alignment` / `cell.font` / `cell.fill` / `cell.border` / `cell.numberFormat` 读取当前样式、对齐、字体、填充、边框和数字格式定义，并用 `cell.setStyle(patch)` / `cell.setAlignment(patch)` / `cell.setFont(patch)` / `cell.setFill(patch)` / `cell.setBorder(patch)` / `cell.setNumberFormat(formatCode)` / `cell.cloneStyle(patch?)` 直接派生并应用新样式
+- `sheet.cell(address)` 返回可复用的 `Cell` 句柄，值/公式/样式索引会按工作表 revision 缓存；现在也可以通过 `cell.style` / `cell.alignment` / `cell.font` / `cell.fill` / `cell.backgroundColor` / `cell.border` / `cell.numberFormat` 读取当前样式、对齐、字体、填充、背景色、边框和数字格式定义，并用 `cell.setStyle(patch)` / `cell.setAlignment(patch)` / `cell.setFont(patch)` / `cell.setFill(patch)` / `cell.setBackgroundColor(color)` / `cell.setBorder(patch)` / `cell.setNumberFormat(formatCode)` / `cell.cloneStyle(patch?)` 直接派生并应用新样式
 - `sheet.cell()` / `getCell()` / `setCell()` / `getFormula()` / `setFormula()` 现在同时支持 `A1` 地址和 `(rowNumber, column)` 两种调用方式；行列索引是从 `1` 开始
 - 后续 `getCell` / `getFormula` 会直接走索引查找，不再每次整张表做字符串匹配
 - `sheet.rowCount` / `sheet.columnCount` 当前表示已用区域的最大行号 / 最大列号；空表返回 `0`
@@ -290,6 +294,8 @@ await workbook.save("output.xlsx");
 - `sheet.setFont()` / `cell.setFont()` 会先 clone 当前 `fontId`，再 clone 当前 `styleId` 并把新 `fontId` 套上去，所以只会影响当前单元格，不会污染其它共用旧字体或旧样式的单元格
 - `sheet.getFill()` 会解析当前单元格最终引用到的填充定义
 - `sheet.setFill()` / `cell.setFill()` 会先 clone 当前 `fillId`，再 clone 当前 `styleId` 并把新 `fillId` 套上去，所以只会影响当前单元格，不会污染其它共用旧填充或旧样式的单元格
+- `sheet.getBackgroundColor()` / `cell.backgroundColor` 是基于填充层的简化读取，只在 `solid` 填充且 `fgColor.rgb` 存在时返回 ARGB 颜色
+- `sheet.setBackgroundColor()` / `cell.setBackgroundColor()` 是基于填充层的简化写法：传颜色时会写成 `solid + fgColor.rgb`，传 `null` 会回退成 `none`
 - `sheet.getBorder()` 会解析当前单元格最终引用到的边框定义
 - `sheet.setBorder()` / `cell.setBorder()` 会先 clone 当前 `borderId`，再 clone 当前 `styleId` 并把新 `borderId` 套上去，所以只会影响当前单元格，不会污染其它共用旧边框或旧样式的单元格
 - `sheet.getNumberFormat()` 会解析当前单元格最终引用到的数字格式定义，内建格式会直接映射成常见 format code

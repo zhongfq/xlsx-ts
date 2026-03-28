@@ -550,6 +550,56 @@ test("cell fill APIs clone and apply fills without mutating shared fill ids", as
   assert.match(sheetXml, /<c r="B1" s="3" t="inlineStr"><is><t>World<\/t><\/is><\/c>/);
 });
 
+test("background color helper APIs set solid fills and can clear them", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" s="1" t="inlineStr"><is><t>Hello</t></is></c>
+      <c r="B1" s="1" t="inlineStr"><is><t>World</t></is></c>
+    </row>
+  </sheetData>
+</worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+  const cell = sheet.cell("B1");
+
+  assert.equal(sheet.getBackgroundColor("A1"), null);
+  assert.equal(cell.backgroundColor, null);
+
+  const a1FillId = sheet.setBackgroundColor("A1", "FFFF0000");
+  const b1FillId = cell.setBackgroundColor("FF00FF00");
+
+  assert.equal(a1FillId, 2);
+  assert.equal(b1FillId, 3);
+  assert.equal(sheet.getBackgroundColor("A1"), "FFFF0000");
+  assert.equal(cell.backgroundColor, "FF00FF00");
+  assert.equal(workbook.getFill(0)?.patternType, "none");
+
+  const clearedFillId = cell.setBackgroundColor(null);
+
+  assert.equal(clearedFillId, 4);
+  assert.equal(cell.backgroundColor, null);
+  assert.deepEqual(cell.fill, {
+    patternType: "none",
+    fgColor: null,
+    bgColor: null,
+  });
+
+  const stylesXml = entryText(workbook.toEntries(), "xl/styles.xml");
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.match(stylesXml, /<fills count="5">/);
+  assert.match(stylesXml, /<fill><patternFill patternType="solid"><fgColor rgb="FFFF0000"\/><\/patternFill><\/fill>/);
+  assert.match(stylesXml, /<fill><patternFill patternType="solid"><fgColor rgb="FF00FF00"\/><\/patternFill><\/fill>/);
+  assert.match(sheetXml, /<c r="A1" s="2" t="inlineStr"><is><t>Hello<\/t><\/is><\/c>/);
+  assert.match(sheetXml, /<c r="B1" s="4" t="inlineStr"><is><t>World<\/t><\/is><\/c>/);
+});
+
 test("border definition APIs read, clone, and update workbook borders", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = await loadFixtureEntries(fixtureDir);

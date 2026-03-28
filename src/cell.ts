@@ -61,6 +61,10 @@ export class Cell {
     return this.sheet.getFill(this.address);
   }
 
+  get backgroundColor(): string | null {
+    return this.sheet.getBackgroundColor(this.address);
+  }
+
   get border(): CellBorderDefinition | null {
     return this.sheet.getBorder(this.address);
   }
@@ -103,6 +107,10 @@ export class Cell {
 
   setFill(patch: CellFillPatch): number {
     return this.sheet.setFill(this.address, patch);
+  }
+
+  setBackgroundColor(color: string | null): number {
+    return this.sheet.setBackgroundColor(this.address, color);
   }
 
   setBorder(patch: CellBorderPatch): number {

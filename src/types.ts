@@ -6,6 +6,68 @@ export interface ArchiveEntry {
 export type CellValue = string | number | boolean | null;
 export type CellType = "missing" | "blank" | "string" | "number" | "boolean" | "formula";
 export type SheetVisibility = "visible" | "hidden" | "veryHidden";
+export type OpenXmlStringEnum = string & {};
+export type CellStyleHorizontalAlignment =
+  | "general"
+  | "left"
+  | "center"
+  | "right"
+  | "fill"
+  | "justify"
+  | "centerContinuous"
+  | "distributed"
+  | OpenXmlStringEnum;
+export type CellStyleVerticalAlignment =
+  | "top"
+  | "center"
+  | "bottom"
+  | "justify"
+  | "distributed"
+  | OpenXmlStringEnum;
+export type CellFontUnderline =
+  | "single"
+  | "double"
+  | "singleAccounting"
+  | "doubleAccounting"
+  | OpenXmlStringEnum;
+export type CellFontScheme = "major" | "minor" | OpenXmlStringEnum;
+export type CellFontVerticalAlign = "baseline" | "superscript" | "subscript" | OpenXmlStringEnum;
+export type CellFillPatternType =
+  | "none"
+  | "solid"
+  | "mediumGray"
+  | "darkGray"
+  | "lightGray"
+  | "darkHorizontal"
+  | "darkVertical"
+  | "darkDown"
+  | "darkUp"
+  | "darkGrid"
+  | "darkTrellis"
+  | "lightHorizontal"
+  | "lightVertical"
+  | "lightDown"
+  | "lightUp"
+  | "lightGrid"
+  | "lightTrellis"
+  | "gray125"
+  | "gray0625"
+  | OpenXmlStringEnum;
+export type CellBorderStyle =
+  | "thin"
+  | "medium"
+  | "dashed"
+  | "dotted"
+  | "thick"
+  | "double"
+  | "hair"
+  | "mediumDashed"
+  | "dashDot"
+  | "mediumDashDot"
+  | "dashDotDot"
+  | "mediumDashDotDot"
+  | "slantDashDot"
+  | OpenXmlStringEnum;
 
 export interface CellSnapshot {
   exists: boolean;
@@ -23,8 +85,8 @@ export interface CellEntry extends CellSnapshot {
 }
 
 export interface CellStyleAlignment {
-  horizontal?: string;
-  vertical?: string;
+  horizontal?: CellStyleHorizontalAlignment;
+  vertical?: CellStyleVerticalAlignment;
   textRotation?: number;
   wrapText?: boolean;
   shrinkToFit?: boolean;
@@ -35,8 +97,8 @@ export interface CellStyleAlignment {
 }
 
 export interface CellStyleAlignmentPatch {
-  horizontal?: string | null;
-  vertical?: string | null;
+  horizontal?: CellStyleHorizontalAlignment | null;
+  vertical?: CellStyleVerticalAlignment | null;
   textRotation?: number | null;
   wrapText?: boolean | null;
   shrinkToFit?: boolean | null;
@@ -105,7 +167,7 @@ export interface CellFontColorPatch {
 export interface CellFontDefinition {
   bold: boolean | null;
   italic: boolean | null;
-  underline: string | null;
+  underline: CellFontUnderline | null;
   strike: boolean | null;
   outline: boolean | null;
   shadow: boolean | null;
@@ -115,15 +177,15 @@ export interface CellFontDefinition {
   name: string | null;
   family: number | null;
   charset: number | null;
-  scheme: string | null;
-  vertAlign: string | null;
+  scheme: CellFontScheme | null;
+  vertAlign: CellFontVerticalAlign | null;
   color: CellFontColor | null;
 }
 
 export interface CellFontPatch {
   bold?: boolean | null;
   italic?: boolean | null;
-  underline?: string | null;
+  underline?: CellFontUnderline | null;
   strike?: boolean | null;
   outline?: boolean | null;
   shadow?: boolean | null;
@@ -133,8 +195,8 @@ export interface CellFontPatch {
   name?: string | null;
   family?: number | null;
   charset?: number | null;
-  scheme?: string | null;
-  vertAlign?: string | null;
+  scheme?: CellFontScheme | null;
+  vertAlign?: CellFontVerticalAlign | null;
   color?: CellFontColorPatch | null;
 }
 
@@ -155,13 +217,13 @@ export interface CellFillColorPatch {
 }
 
 export interface CellFillDefinition {
-  patternType: string | null;
+  patternType: CellFillPatternType | null;
   fgColor: CellFillColor | null;
   bgColor: CellFillColor | null;
 }
 
 export interface CellFillPatch {
-  patternType?: string | null;
+  patternType?: CellFillPatternType | null;
   fgColor?: CellFillColorPatch | null;
   bgColor?: CellFillColorPatch | null;
 }
@@ -183,12 +245,12 @@ export interface CellBorderColorPatch {
 }
 
 export interface CellBorderSideDefinition {
-  style: string | null;
+  style: CellBorderStyle | null;
   color: CellBorderColor | null;
 }
 
 export interface CellBorderSidePatch {
-  style?: string | null;
+  style?: CellBorderStyle | null;
   color?: CellBorderColorPatch | null;
 }
 

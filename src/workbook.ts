@@ -367,20 +367,29 @@ export class Workbook {
   }
 
   readSharedStrings(): string[] {
+    return [...this.getSharedStringsCache()];
+  }
+
+  getSharedString(index: number): string | null {
+    return this.getSharedStringsCache()[index] ?? null;
+  }
+
+  private getSharedStringsCache(): string[] {
     if (this.sharedStringsCache) {
-      return [...this.sharedStringsCache];
+      return this.sharedStringsCache;
     }
 
     const sharedStringsPath = this.getWorkbookContext().sharedStringsPath;
     if (!sharedStringsPath || !this.entries.has(sharedStringsPath)) {
-      return [];
+      this.sharedStringsCache = [];
+      return this.sharedStringsCache;
     }
 
     const xml = this.readEntryText(sharedStringsPath);
     this.sharedStringsCache = Array.from(xml.matchAll(/<si\b[^>]*>([\s\S]*?)<\/si>/g), (match) =>
       extractAllTagTexts(match[1], "t").map(decodeXmlText).join(""),
     );
-    return [...this.sharedStringsCache];
+    return this.sharedStringsCache;
   }
 
   rewriteDefinedNamesForSheetStructure(

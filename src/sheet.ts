@@ -106,7 +106,7 @@ export class Sheet {
   getCell(address: string): CellValue;
   getCell(rowNumber: number, column: number | string): CellValue;
   getCell(addressOrRowNumber: string | number, column?: number | string): CellValue {
-    return this.cell(resolveCellAddress(addressOrRowNumber, column)).value;
+    return this.readCellSnapshot(resolveCellAddress(addressOrRowNumber, column)).value;
   }
 
   rename(name: string): void {
@@ -116,7 +116,7 @@ export class Sheet {
   getFormula(address: string): string | null;
   getFormula(rowNumber: number, column: number | string): string | null;
   getFormula(addressOrRowNumber: string | number, column?: number | string): string | null {
-    return this.cell(resolveCellAddress(addressOrRowNumber, column)).formula;
+    return this.readCellSnapshot(resolveCellAddress(addressOrRowNumber, column)).formula;
   }
 
   get rowCount(): number {
@@ -1083,7 +1083,7 @@ function parseCellSnapshot(
   const rawType = getXmlAttr(cell.attributesSource, "t") ?? null;
   const styleIdText = getXmlAttr(cell.attributesSource, "s");
   const styleId = styleIdText === undefined ? null : Number(styleIdText);
-  const formulaText = extractTagText(cell.innerXml, "f");
+  const formulaText = extractCellFormulaText(cell.innerXml);
   const formula = formulaText === undefined ? null : decodeXmlText(formulaText);
 
   if (formula !== null) {
@@ -1119,35 +1119,46 @@ function parseCellSnapshot(
 
 function parseCellValue(workbook: Workbook, cell: LocatedCell, rawType: string | null): CellValue {
   if (rawType === "inlineStr") {
-    return extractAllTagTexts(cell.innerXml, "t").map(decodeXmlText).join("");
+    return extractInlineStringTexts(cell.innerXml).map(decodeXmlText).join("");
   }
 
   if (rawType === "str") {
-    const rawString = extractTagText(cell.innerXml, "v");
+    const rawString = extractCellValueText(cell.innerXml);
     return rawString === undefined ? null : decodeXmlText(rawString);
   }
 
   if (rawType === "s") {
-    const indexText = extractTagText(cell.innerXml, "v");
+    const indexText = extractCellValueText(cell.innerXml);
     if (!indexText) {
       return null;
     }
 
-    const value = workbook.readSharedStrings()[Number(indexText)];
-    return value ?? null;
+    return workbook.getSharedString(Number(indexText));
   }
 
   if (rawType === "b") {
-    return extractTagText(cell.innerXml, "v") === "1";
+    return extractCellValueText(cell.innerXml) === "1";
   }
 
-  const rawValue = extractTagText(cell.innerXml, "v");
+  const rawValue = extractCellValueText(cell.innerXml);
   if (rawValue === undefined) {
     return null;
   }
 
   const numericValue = Number(rawValue);
   return Number.isFinite(numericValue) ? numericValue : decodeXmlText(rawValue);
+}
+
+function extractCellFormulaText(innerXml: string): string | undefined {
+  return innerXml.match(CELL_FORMULA_REGEX)?.[1];
+}
+
+function extractCellValueText(innerXml: string): string | undefined {
+  return innerXml.match(CELL_VALUE_REGEX)?.[1];
+}
+
+function extractInlineStringTexts(innerXml: string): string[] {
+  return Array.from(innerXml.matchAll(INLINE_STRING_TEXT_REGEX), (match) => match[1]);
 }
 
 function buildValueCellXml(address: string, value: CellValue, existingAttributesSource?: string): string {
@@ -3492,6 +3503,9 @@ const TABLE_CONTENT_TYPE =
   "application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml";
 const HYPERLINK_RELATIONSHIP_TYPE =
   "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
+const CELL_FORMULA_REGEX = /<f\b[^>]*>([\s\S]*?)<\/f>/;
+const CELL_VALUE_REGEX = /<v\b[^>]*>([\s\S]*?)<\/v>/;
+const INLINE_STRING_TEXT_REGEX = /<t\b[^>]*>([\s\S]*?)<\/t>/g;
 const AUTO_FILTER_FOLLOWING_TAGS = [
   "sortState",
   "mergeCells",

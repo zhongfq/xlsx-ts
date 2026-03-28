@@ -273,6 +273,62 @@ export class Sheet {
     return tables;
   }
 
+  addTable(
+    range: string,
+    options: { name?: string } = {},
+  ): { name: string; displayName: string; range: string; path: string } {
+    const normalizedRange = normalizeRangeRef(range);
+    const existingTables = this.getTables();
+    const name = options.name ?? getNextTableName(this.workbook.listEntries());
+    assertTableName(name);
+
+    if (existingTables.some((table) => table.name === name || table.displayName === name)) {
+      throw new XlsxError(`Table already exists: ${name}`);
+    }
+
+    const tablePath = getNextTablePath(this.workbook.listEntries());
+    const tableId = getNextTableId(this.workbook.listEntries(), this.workbook);
+    const relationshipId = getNextRelationshipIdFromXml(this.readSheetRelationshipsXml());
+    const tableXml = buildTableXml(normalizedRange, tableId, name, this.getRange(normalizedRange)[0] ?? []);
+
+    this.workbook.writeEntryText(tablePath, tableXml);
+    this.writeSheetRelationshipsXml(
+      appendRelationship(
+        this.readSheetRelationshipsXml(),
+        relationshipId,
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/table",
+        makeRelativeSheetRelationshipTarget(this.path, tablePath),
+      ),
+    );
+    this.writeSheetXml(appendTablePart(this.getSheetIndex().xml, relationshipId));
+    this.writeContentTypesXml(addContentTypeOverride(this.readContentTypesXml(), tablePath, TABLE_CONTENT_TYPE));
+
+    return {
+      name,
+      displayName: name,
+      range: normalizedRange,
+      path: tablePath,
+    };
+  }
+
+  removeTable(name: string): void {
+    const tableReference = this.getTableReferences().find((table) => {
+      const tableXml = this.workbook.readEntryText(table.path);
+      const tableTagMatch = tableXml.match(/<table\b([^>]*?)>/);
+      const attributesSource = tableTagMatch?.[1] ?? "";
+      return getXmlAttr(attributesSource, "name") === name || getXmlAttr(attributesSource, "displayName") === name;
+    });
+
+    if (!tableReference) {
+      throw new XlsxError(`Table not found: ${name}`);
+    }
+
+    this.writeSheetXml(removeTablePartsFromSheetXml(this.getSheetIndex().xml, [tableReference.relationshipId]));
+    this.writeSheetRelationshipsXml(removeRelationshipById(this.readSheetRelationshipsXml(), tableReference.relationshipId));
+    this.writeContentTypesXml(removeContentTypeOverride(this.readContentTypesXml(), tableReference.path));
+    this.workbook.removeEntry(tableReference.path);
+  }
+
   insertRow(rowNumber: number, count = 1): void {
     assertRowNumber(rowNumber);
     assertInsertCount(count);
@@ -750,7 +806,7 @@ export class Sheet {
       return [];
     }
 
-    const relationshipsPath = `${dirnamePosix(this.path)}/_rels/${basenamePosix(this.path)}.rels`;
+    const relationshipsPath = getSheetRelationshipsPath(this.path);
     if (!this.workbook.listEntries().includes(relationshipsPath)) {
       return [];
     }
@@ -784,6 +840,25 @@ export class Sheet {
     return tables;
   }
 
+  private readSheetRelationshipsXml(): string {
+    const relationshipsPath = getSheetRelationshipsPath(this.path);
+    return this.workbook.listEntries().includes(relationshipsPath)
+      ? this.workbook.readEntryText(relationshipsPath)
+      : EMPTY_RELATIONSHIPS_XML;
+  }
+
+  private writeSheetRelationshipsXml(relationshipsXml: string): void {
+    this.workbook.writeEntryText(getSheetRelationshipsPath(this.path), relationshipsXml);
+  }
+
+  private readContentTypesXml(): string {
+    return this.workbook.readEntryText("[Content_Types].xml");
+  }
+
+  private writeContentTypesXml(contentTypesXml: string): void {
+    this.workbook.writeEntryText("[Content_Types].xml", contentTypesXml);
+  }
+
   private updateTableReferences(
     targetColumnNumber: number,
     columnCount: number,
@@ -795,14 +870,14 @@ export class Sheet {
       mode === "shift"
         ? shiftRangeRef(range, targetColumnNumber, columnCount, targetRowNumber, rowCount)
         : deleteRangeRef(range, targetColumnNumber, columnCount, targetRowNumber, rowCount);
-    const removedRelationshipIds: string[] = [];
+    const removedTables: TableReference[] = [];
 
     for (const table of this.getTableReferences()) {
       const tableXml = this.workbook.readEntryText(table.path);
       const nextTableXml = rewriteTableReferenceXml(tableXml, transformRange);
 
       if (nextTableXml === null) {
-        removedRelationshipIds.push(table.relationshipId);
+        removedTables.push(table);
         continue;
       }
 
@@ -811,14 +886,29 @@ export class Sheet {
       }
     }
 
-    if (removedRelationshipIds.length === 0) {
+    if (removedTables.length === 0) {
       return;
     }
 
+    const removedRelationshipIds = removedTables.map((table) => table.relationshipId);
     const nextSheetXml = removeTablePartsFromSheetXml(this.getSheetIndex().xml, removedRelationshipIds);
     if (nextSheetXml !== this.getSheetIndex().xml) {
       this.writeSheetXml(nextSheetXml);
     }
+
+    this.writeSheetRelationshipsXml(
+      removedRelationshipIds.reduce(
+        (relationshipsXml, relationshipId) => removeRelationshipById(relationshipsXml, relationshipId),
+        this.readSheetRelationshipsXml(),
+      ),
+    );
+
+    let nextContentTypesXml = this.readContentTypesXml();
+    for (const table of removedTables) {
+      nextContentTypesXml = removeContentTypeOverride(nextContentTypesXml, table.path);
+      this.workbook.removeEntry(table.path);
+    }
+    this.writeContentTypesXml(nextContentTypesXml);
   }
 
   private writeSheetXml(nextSheetXml: string): void {
@@ -2459,6 +2549,204 @@ function removeTablePartsFromSheetXml(sheetXml: string, relationshipIds: string[
   );
 }
 
+function getSheetRelationshipsPath(sheetPath: string): string {
+  return `${dirnamePosix(sheetPath)}/_rels/${basenamePosix(sheetPath)}.rels`;
+}
+
+function getNextTablePath(entryPaths: string[]): string {
+  let nextIndex = 1;
+
+  for (const path of entryPaths) {
+    const match = path.match(/^xl\/tables\/table(\d+)\.xml$/);
+    if (match) {
+      nextIndex = Math.max(nextIndex, Number(match[1]) + 1);
+    }
+  }
+
+  return `xl/tables/table${nextIndex}.xml`;
+}
+
+function getNextTableId(entryPaths: string[], workbook: Workbook): number {
+  let nextId = 1;
+
+  for (const path of entryPaths) {
+    if (!/^xl\/tables\/table\d+\.xml$/.test(path)) {
+      continue;
+    }
+
+    const tableXml = workbook.readEntryText(path);
+    const idText = getXmlAttr(tableXml.match(/<table\b([^>]*?)>/)?.[1] ?? "", "id");
+    if (idText) {
+      nextId = Math.max(nextId, Number(idText) + 1);
+    }
+  }
+
+  return nextId;
+}
+
+function getNextTableName(entryPaths: string[]): string {
+  let nextIndex = 1;
+
+  for (const path of entryPaths) {
+    const match = path.match(/^xl\/tables\/table(\d+)\.xml$/);
+    if (match) {
+      nextIndex = Math.max(nextIndex, Number(match[1]) + 1);
+    }
+  }
+
+  return `Table${nextIndex}`;
+}
+
+function assertTableName(name: string): void {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+    throw new XlsxError(`Invalid table name: ${name}`);
+  }
+}
+
+function buildTableXml(
+  range: string,
+  id: number,
+  name: string,
+  headerValues: CellValue[],
+): string {
+  const columnNames = buildTableColumnNames(headerValues, parseRangeRef(range).endColumn - parseRangeRef(range).startColumn + 1);
+
+  return (
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+    `<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="${id}" name="${escapeXmlText(name)}" displayName="${escapeXmlText(name)}" ref="${range}" totalsRowShown="0">` +
+    `<autoFilter ref="${range}"/>` +
+    `<tableColumns count="${columnNames.length}">` +
+    columnNames
+      .map((columnName, index) => `<tableColumn id="${index + 1}" name="${escapeXmlText(columnName)}"/>`)
+      .join("") +
+    `</tableColumns>` +
+    `<tableStyleInfo name="TableStyleMedium2" showFirstColumn="0" showLastColumn="0" showRowStripes="1" showColumnStripes="0"/>` +
+    `</table>`
+  );
+}
+
+function buildTableColumnNames(headerValues: CellValue[], width: number): string[] {
+  const names: string[] = [];
+  const seen = new Map<string, number>();
+
+  for (let index = 0; index < width; index += 1) {
+    const rawValue = headerValues[index];
+    const baseName =
+      typeof rawValue === "string" && rawValue.trim().length > 0 ? rawValue.trim() : `Column${index + 1}`;
+    const nextCount = (seen.get(baseName) ?? 0) + 1;
+    seen.set(baseName, nextCount);
+    names.push(nextCount === 1 ? baseName : `${baseName}_${nextCount}`);
+  }
+
+  return names;
+}
+
+function getNextRelationshipIdFromXml(relationshipsXml: string): string {
+  let nextId = 1;
+
+  for (const match of relationshipsXml.matchAll(/\bId="rId(\d+)"/g)) {
+    nextId = Math.max(nextId, Number(match[1]) + 1);
+  }
+
+  return `rId${nextId}`;
+}
+
+function appendRelationship(
+  relationshipsXml: string,
+  relationshipId: string,
+  type: string,
+  target: string,
+): string {
+  const closingTag = "</Relationships>";
+  const insertionIndex = relationshipsXml.indexOf(closingTag);
+  if (insertionIndex === -1) {
+    throw new XlsxError("Worksheet relationships file is missing </Relationships>");
+  }
+
+  const relationshipXml =
+    `<Relationship Id="${relationshipId}" Type="${escapeXmlText(type)}" Target="${escapeXmlText(target)}"/>`;
+  return relationshipsXml.slice(0, insertionIndex) + relationshipXml + relationshipsXml.slice(insertionIndex);
+}
+
+function removeRelationshipById(relationshipsXml: string, relationshipId: string): string {
+  return relationshipsXml.replace(
+    new RegExp(`<Relationship\\b[^>]*\\bId="${escapeRegex(relationshipId)}"[^>]*/>`),
+    "",
+  );
+}
+
+function makeRelativeSheetRelationshipTarget(sheetPath: string, targetPath: string): string {
+  const fromParts = dirnamePosix(sheetPath).split("/").filter((part) => part.length > 0);
+  const toParts = targetPath.split("/").filter((part) => part.length > 0);
+  let commonLength = 0;
+
+  while (
+    commonLength < fromParts.length &&
+    commonLength < toParts.length &&
+    fromParts[commonLength] === toParts[commonLength]
+  ) {
+    commonLength += 1;
+  }
+
+  const upward = fromParts.slice(commonLength).map(() => "..");
+  const downward = toParts.slice(commonLength);
+  return [...upward, ...downward].join("/");
+}
+
+function appendTablePart(sheetXml: string, relationshipId: string): string {
+  const tablePartsMatch = sheetXml.match(/<tableParts\b[^>]*>([\s\S]*?)<\/tableParts>/);
+  if (tablePartsMatch && tablePartsMatch.index !== undefined) {
+    const tableParts = Array.from(
+      tablePartsMatch[1].matchAll(/<tablePart\b([^>]*?)\/>/g),
+      (match) => `<tablePart${match[1] ? ` ${match[1].trim()}` : ""}/>`,
+    );
+    tableParts.push(`<tablePart r:id="${relationshipId}"/>`);
+    const nextTablePartsXml = `<tableParts count="${tableParts.length}">${tableParts.join("")}</tableParts>`;
+    return (
+      sheetXml.slice(0, tablePartsMatch.index) +
+      nextTablePartsXml +
+      sheetXml.slice(tablePartsMatch.index + tablePartsMatch[0].length)
+    );
+  }
+
+  const closingTag = "</worksheet>";
+  const insertionIndex = sheetXml.indexOf(closingTag);
+  if (insertionIndex === -1) {
+    throw new XlsxError("Worksheet is missing </worksheet>");
+  }
+
+  return (
+    sheetXml.slice(0, insertionIndex) +
+    `<tableParts count="1"><tablePart r:id="${relationshipId}"/></tableParts>` +
+    sheetXml.slice(insertionIndex)
+  );
+}
+
+function addContentTypeOverride(contentTypesXml: string, partPath: string, contentType: string): string {
+  if (new RegExp(`PartName="/${escapeRegex(partPath)}"`).test(contentTypesXml)) {
+    return contentTypesXml;
+  }
+
+  const closingTag = "</Types>";
+  const insertionIndex = contentTypesXml.indexOf(closingTag);
+  if (insertionIndex === -1) {
+    throw new XlsxError("Content types file is missing </Types>");
+  }
+
+  return (
+    contentTypesXml.slice(0, insertionIndex) +
+    `<Override PartName="/${escapeXmlText(partPath)}" ContentType="${escapeXmlText(contentType)}"/>` +
+    contentTypesXml.slice(insertionIndex)
+  );
+}
+
+function removeContentTypeOverride(contentTypesXml: string, partPath: string): string {
+  return contentTypesXml.replace(
+    new RegExp(`<Override\\b[^>]*\\bPartName="/${escapeRegex(partPath)}"[^>]*/>`),
+    "",
+  );
+}
+
 function compareRangeRefs(left: string, right: string): number {
   const leftRange = parseRangeRef(left);
   const rightRange = parseRangeRef(right);
@@ -2556,3 +2844,8 @@ const WORKSHEET_CELL_REF_ATTRIBUTES: Array<[string, string]> = [
   ["selection", "activeCell"],
   ["pane", "topLeftCell"],
 ];
+const TABLE_CONTENT_TYPE =
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml";
+const EMPTY_RELATIONSHIPS_XML =
+  `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+  `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>`;

@@ -647,9 +647,60 @@ test("deleteRow removes table parts when the full table range is deleted", async
   sheet.deleteRow(1, 3);
 
   assert.deepEqual(sheet.getTables(), []);
+  assert.equal(workbook.listEntries().includes("xl/tables/table1.xml"), false);
 
   const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  const relsXml = entryText(workbook.toEntries(), "xl/worksheets/_rels/sheet1.xml.rels");
+  const contentTypesXml = entryText(workbook.toEntries(), "[Content_Types].xml");
   assert.doesNotMatch(sheetXml, /<tableParts\b/);
+  assert.doesNotMatch(relsXml, /relationships\/table/);
+  assert.doesNotMatch(contentTypesXml, /spreadsheetml\.table\+xml/);
+});
+
+test("sheet addTable and removeTable manage package parts", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = await loadFixtureEntries(fixtureDir);
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.setRow(1, ["Name", "Score"]);
+  sheet.setRow(2, ["Alice", 98]);
+  sheet.setRow(3, ["Bob", 87]);
+
+  const table = sheet.addTable("A1:B3", { name: "Scores" });
+
+  assert.deepEqual(table, {
+    name: "Scores",
+    displayName: "Scores",
+    range: "A1:B3",
+    path: "xl/tables/table1.xml",
+  });
+  assert.deepEqual(sheet.getTables(), [table]);
+
+  let sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  let relsXml = entryText(workbook.toEntries(), "xl/worksheets/_rels/sheet1.xml.rels");
+  let contentTypesXml = entryText(workbook.toEntries(), "[Content_Types].xml");
+  let tableXml = entryText(workbook.toEntries(), "xl/tables/table1.xml");
+
+  assert.match(sheetXml, /<tableParts count="1"><tablePart r:id="rId1"\/><\/tableParts>/);
+  assert.match(relsXml, /<Relationship Id="rId1" Type="http:\/\/schemas\.openxmlformats\.org\/officeDocument\/2006\/relationships\/table" Target="\.\.\/tables\/table1\.xml"\/>/);
+  assert.match(contentTypesXml, /<Override PartName="\/xl\/tables\/table1\.xml" ContentType="application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.table\+xml"\/>/);
+  assert.match(tableXml, /<table [^>]*name="Scores" displayName="Scores" ref="A1:B3"[^>]*>/);
+  assert.match(tableXml, /<tableColumn id="1" name="Name"\/>/);
+  assert.match(tableXml, /<tableColumn id="2" name="Score"\/>/);
+
+  sheet.removeTable("Scores");
+
+  assert.deepEqual(sheet.getTables(), []);
+  assert.equal(workbook.listEntries().includes("xl/tables/table1.xml"), false);
+
+  sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  relsXml = entryText(workbook.toEntries(), "xl/worksheets/_rels/sheet1.xml.rels");
+  contentTypesXml = entryText(workbook.toEntries(), "[Content_Types].xml");
+
+  assert.doesNotMatch(sheetXml, /<tableParts\b/);
+  assert.doesNotMatch(relsXml, /relationships\/table/);
+  assert.doesNotMatch(contentTypesXml, /spreadsheetml\.table\+xml/);
 });
 
 test("row APIs read sparse rows and write from a column offset", async () => {

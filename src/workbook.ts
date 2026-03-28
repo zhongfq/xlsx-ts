@@ -207,11 +207,11 @@ export class Workbook {
     this.rewriteAppSheetNames(
       context.sheets.filter((sheet) => sheet.name !== sheetName).map((sheet) => sheet.name),
     );
-    this.deleteEntry(deletedSheet.path);
+    this.removeEntry(deletedSheet.path);
 
     const sheetRelsPath = `${dirnamePosix(deletedSheet.path)}/_rels/${basenamePosix(deletedSheet.path)}.rels`;
     if (this.entries.has(sheetRelsPath)) {
-      this.deleteEntry(sheetRelsPath);
+      this.removeEntry(sheetRelsPath);
     }
   }
 
@@ -430,7 +430,7 @@ export class Workbook {
     this.entries.set(path, XML_ENCODER.encode(text));
   }
 
-  private deleteEntry(path: string): void {
+  removeEntry(path: string): void {
     if (!this.entries.delete(path)) {
       return;
     }

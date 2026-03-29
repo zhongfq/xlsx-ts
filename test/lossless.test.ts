@@ -266,6 +266,97 @@ test("sheet metadata readers tolerate single-quoted selection, merge, and hyperl
   ]);
 });
 
+test("sheet metadata writers tolerate single-quoted sheetViews and hyperlinks containers", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version='1.0' encoding='UTF-8' standalone='yes'?>
+<worksheet xmlns='http://schemas.openxmlformats.org/spreadsheetml/2006/main'>
+  <sheetViews>
+    <sheetView workbookViewId='0'>
+      <selection activeCell='A1' sqref='A1'/>
+    </sheetView>
+  </sheetViews>
+  <sheetData>
+    <row r='1'><c r='A1' t='inlineStr'><is><t>Hello</t></is></c></row>
+  </sheetData>
+  <hyperlinks>
+    <hyperlink ref='A1' location='#Sheet1!A1'/>
+  </hyperlinks>
+</worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.freezePane(1, 1);
+  assert.deepEqual(sheet.getFreezePane(), {
+    activePane: "bottomRight",
+    columnCount: 1,
+    rowCount: 1,
+    topLeftCell: "B2",
+  });
+
+  sheet.setSelection("C3", "C3:D4");
+  assert.deepEqual(sheet.getSelection(), {
+    activeCell: "C3",
+    pane: "bottomRight",
+    range: "C3:D4",
+  });
+
+  sheet.unfreezePane();
+  assert.equal(sheet.getFreezePane(), null);
+  assert.deepEqual(sheet.getSelection(), {
+    activeCell: "C3",
+    pane: null,
+    range: "C3:D4",
+  });
+
+  sheet.setHyperlink("B2", "#Sheet1!A1", { tooltip: "Jump" });
+  sheet.removeHyperlink("A1");
+
+  assert.deepEqual(sheet.getHyperlinks(), [
+    { address: "B2", target: "#Sheet1!A1", tooltip: "Jump", type: "internal" },
+  ]);
+
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.doesNotMatch(sheetXml, /<pane\b/);
+  assert.match(sheetXml, /<selection activeCell="C3" sqref="C3:D4"\/>/);
+  assert.doesNotMatch(sheetXml, /<hyperlink ref="A1"/);
+  assert.match(sheetXml, /<hyperlink ref="B2" location="#Sheet1!A1" tooltip="Jump"\/>/);
+});
+
+test("defined name deletion tolerates single-quoted definedNames tags", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/workbook.xml",
+    `<?xml version='1.0' encoding='UTF-8' standalone='yes'?>
+<workbook xmlns='http://schemas.openxmlformats.org/spreadsheetml/2006/main' xmlns:r='http://schemas.openxmlformats.org/officeDocument/2006/relationships'>
+  <sheets>
+    <sheet name='Sheet1' sheetId='1' r:id='rId1'/>
+  </sheets>
+  <definedNames>
+    <definedName name='GlobalValue'>$A$1</definedName>
+    <definedName name='LocalValue' localSheetId='0'>$B$2</definedName>
+  </definedNames>
+</workbook>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+
+  workbook.deleteDefinedName("LocalValue", "Sheet1");
+  assert.deepEqual(workbook.getDefinedNames(), [
+    { hidden: false, name: "GlobalValue", scope: null, value: "$A$1" },
+  ]);
+
+  workbook.deleteDefinedName("GlobalValue");
+
+  const workbookXml = entryText(workbook.toEntries(), "xl/workbook.xml");
+  assert.doesNotMatch(workbookXml, /LocalValue/);
+  assert.doesNotMatch(workbookXml, /GlobalValue/);
+  assert.doesNotMatch(workbookXml, /<definedNames\b/);
+});
+
 test("sheet reads stay coherent after repeated writes", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = await loadFixtureEntries(fixtureDir);

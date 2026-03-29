@@ -2755,26 +2755,23 @@ function removeDefinedNameFromWorkbookXml(
     return workbookXml;
   }
 
-  const nextInnerXml = definedNamesTag.innerXml.replace(
-    /<definedName\b([^>]*)>([\s\S]*?)<\/definedName>/g,
-    (match, attributesSource) => {
-      const candidateName = getXmlAttr(attributesSource, "name");
-      const candidateLocalSheetIdText = getXmlAttr(attributesSource, "localSheetId");
-      const candidateLocalSheetId = candidateLocalSheetIdText === undefined ? null : Number(candidateLocalSheetIdText);
-      return candidateName === name && candidateLocalSheetId === localSheetId ? "" : match;
-    },
-  );
+  const keptDefinedNames = findXmlTags(definedNamesTag.innerXml, "definedName").filter((tag) => {
+    const candidateName = getTagAttr(tag, "name");
+    const candidateLocalSheetIdText = getTagAttr(tag, "localSheetId");
+    const candidateLocalSheetId = candidateLocalSheetIdText === undefined ? null : Number(candidateLocalSheetIdText);
+    return candidateName !== name || candidateLocalSheetId !== localSheetId;
+  });
 
-  const nextDefinedNamesXml = `<definedNames>${nextInnerXml}</definedNames>`;
-  const nextWorkbookXml =
+  if (keptDefinedNames.length === 0) {
+    return workbookXml.slice(0, definedNamesTag.start) + workbookXml.slice(definedNamesTag.end);
+  }
+
+  const nextDefinedNamesXml = `<definedNames>${keptDefinedNames.map((tag) => tag.source).join("")}</definedNames>`;
+  return (
     workbookXml.slice(0, definedNamesTag.start) +
     nextDefinedNamesXml +
-    workbookXml.slice(definedNamesTag.end);
-
-  return /<definedName\b/.test(nextInnerXml)
-    ? nextWorkbookXml
-    : workbookXml.slice(0, definedNamesTag.start) +
-        workbookXml.slice(definedNamesTag.end);
+    workbookXml.slice(definedNamesTag.end)
+  );
 }
 
 function removeSheetFromWorkbookXml(

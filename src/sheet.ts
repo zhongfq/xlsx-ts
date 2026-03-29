@@ -33,7 +33,7 @@ import {
 } from "./sheet-index.js";
 import type { Workbook } from "./workbook.js";
 import { basenamePosix, dirnamePosix, resolvePosix } from "./utils/path.js";
-import { findFirstXmlTag, findXmlTags, getTagAttr } from "./utils/xml-read.js";
+import { findFirstXmlTag, findXmlTags, getTagAttr, type XmlTag } from "./utils/xml-read.js";
 import {
   decodeXmlText,
   escapeRegex,
@@ -3447,20 +3447,69 @@ function parseSheetAutoFilter(sheetXml: string): string | null {
   return ref ? normalizeRangeRef(ref) : null;
 }
 
+function getXmlTagInnerStart(tag: XmlTag): number {
+  if (tag.innerXml === null) {
+    return tag.end;
+  }
+
+  return tag.end - tag.innerXml.length - `</${tag.tagName}>`.length;
+}
+
+function replaceXmlTagSource(xml: string, tag: XmlTag, nextSource: string): string {
+  return xml.slice(0, tag.start) + nextSource + xml.slice(tag.end);
+}
+
+function replaceNestedXmlTagSource(xml: string, parentTag: XmlTag, childTag: XmlTag, nextSource: string): string {
+  const parentInnerStart = getXmlTagInnerStart(parentTag);
+  return (
+    xml.slice(0, parentInnerStart + childTag.start) +
+    nextSource +
+    xml.slice(parentInnerStart + childTag.end)
+  );
+}
+
+function removeXmlTagsFromInnerXml(innerXml: string, tags: XmlTag[]): string {
+  return [...tags]
+    .sort((left, right) => right.start - left.start)
+    .reduce(
+      (currentXml, tag) => currentXml.slice(0, tag.start) + currentXml.slice(tag.end),
+      innerXml,
+    );
+}
+
+function getSheetViewTags(sheetXml: string): {
+  sheetViewTag: XmlTag | null;
+  sheetViewsTag: XmlTag | null;
+} {
+  const sheetViewsTag = findFirstXmlTag(sheetXml, "sheetViews");
+  const sheetViewTag =
+    sheetViewsTag && sheetViewsTag.innerXml !== null ? findFirstXmlTag(sheetViewsTag.innerXml, "sheetView") : null;
+
+  return { sheetViewTag, sheetViewsTag };
+}
+
+function ensureXmlAttribute(attributes: Array<[string, string]>, name: string, value: string): void {
+  if (!attributes.some(([candidateName]) => candidateName === name)) {
+    attributes.push([name, value]);
+  }
+}
+
 function parseSheetFreezePane(sheetXml: string): FreezePane | null {
-  const paneMatch = sheetXml.match(/<pane\b([^>]*?)\/>/);
-  if (!paneMatch) {
+  const { sheetViewTag } = getSheetViewTags(sheetXml);
+  const paneTag =
+    sheetViewTag && sheetViewTag.innerXml !== null ? findFirstXmlTag(sheetViewTag.innerXml, "pane") : null;
+
+  if (!paneTag) {
     return null;
   }
 
-  const attributesSource = paneMatch[1];
-  const state = getXmlAttr(attributesSource, "state");
+  const state = getTagAttr(paneTag, "state");
   if (state && state !== "frozen" && state !== "frozenSplit") {
     return null;
   }
 
-  const columnCount = Number(getXmlAttr(attributesSource, "xSplit") ?? "0");
-  const rowCount = Number(getXmlAttr(attributesSource, "ySplit") ?? "0");
+  const columnCount = Number(getTagAttr(paneTag, "xSplit") ?? "0");
+  const rowCount = Number(getTagAttr(paneTag, "ySplit") ?? "0");
   if ((!Number.isFinite(columnCount) || columnCount < 0) && (!Number.isFinite(rowCount) || rowCount < 0)) {
     return null;
   }
@@ -3472,8 +3521,8 @@ function parseSheetFreezePane(sheetXml: string): FreezePane | null {
   return {
     columnCount: Number.isFinite(columnCount) ? columnCount : 0,
     rowCount: Number.isFinite(rowCount) ? rowCount : 0,
-    topLeftCell: getXmlAttr(attributesSource, "topLeftCell") ?? makeCellAddress(rowCount + 1, columnCount + 1),
-    activePane: normalizePaneName(getXmlAttr(attributesSource, "activePane")),
+    topLeftCell: getTagAttr(paneTag, "topLeftCell") ?? makeCellAddress(rowCount + 1, columnCount + 1),
+    activePane: normalizePaneName(getTagAttr(paneTag, "activePane")),
   };
 }
 
@@ -3496,9 +3545,9 @@ function parseSheetSelection(sheetXml: string): SheetSelection | null {
 function upsertFreezePaneInSheetXml(sheetXml: string, columnCount: number, rowCount: number): string {
   const paneXml = buildFreezePaneXml(columnCount, rowCount);
   const selectionsXml = buildFreezePaneSelectionsXml(columnCount, rowCount);
-  const sheetViewsMatch = sheetXml.match(/<sheetViews\b[^>]*>([\s\S]*?)<\/sheetViews>/);
+  const { sheetViewsTag, sheetViewTag } = getSheetViewTags(sheetXml);
 
-  if (!sheetViewsMatch || sheetViewsMatch.index === undefined) {
+  if (!sheetViewsTag) {
     const insertionIndex = findWorksheetChildInsertionIndex(sheetXml, SHEET_VIEWS_FOLLOWING_TAGS);
     return (
       sheetXml.slice(0, insertionIndex) +
@@ -3507,64 +3556,49 @@ function upsertFreezePaneInSheetXml(sheetXml: string, columnCount: number, rowCo
     );
   }
 
-  const sheetViewMatch = sheetViewsMatch[1].match(/<sheetView\b([^>]*?)(?:\/>|>([\s\S]*?)<\/sheetView>)/);
-  if (!sheetViewMatch || sheetViewMatch.index === undefined) {
-    return (
-      sheetXml.slice(0, sheetViewsMatch.index) +
-      `<sheetViews><sheetView workbookViewId="0">${paneXml}${selectionsXml}</sheetView></sheetViews>` +
-      sheetXml.slice(sheetViewsMatch.index + sheetViewsMatch[0].length)
+  if (!sheetViewTag) {
+    return replaceXmlTagSource(
+      sheetXml,
+      sheetViewsTag,
+      `<sheetViews><sheetView workbookViewId="0">${paneXml}${selectionsXml}</sheetView></sheetViews>`,
     );
   }
 
-  const attributes = parseAttributes(sheetViewMatch[1]);
-  if (!attributes.some(([name]) => name === "workbookViewId")) {
-    attributes.push(["workbookViewId", "0"]);
-  }
+  const attributes = parseAttributes(sheetViewTag.attributesSource);
+  ensureXmlAttribute(attributes, "workbookViewId", "0");
 
-  const innerXml = sheetViewMatch[2] ?? "";
-  const cleanedInnerXml = innerXml
-    .replace(/<pane\b[^>]*\/>/g, "")
-    .replace(/<selection\b[^>]*\/>/g, "");
-  const nextSheetViewXml = `<sheetView ${serializeAttributes(attributes)}>${paneXml}${selectionsXml}${cleanedInnerXml}</sheetView>`;
-  const relativeStart = sheetViewMatch.index;
-  const absoluteStart = sheetViewsMatch.index + sheetViewsMatch[0].indexOf(sheetViewMatch[0], relativeStart);
+  const innerXml = sheetViewTag.innerXml ?? "";
+  const cleanedInnerXml = removeXmlTagsFromInnerXml(innerXml, [
+    ...findXmlTags(innerXml, "pane"),
+    ...findXmlTags(innerXml, "selection"),
+  ]);
+  const serializedAttributes = serializeAttributes(attributes);
+  const nextSheetViewXml = `<sheetView${serializedAttributes ? ` ${serializedAttributes}` : ""}>${paneXml}${selectionsXml}${cleanedInnerXml}</sheetView>`;
 
-  return (
-    sheetXml.slice(0, absoluteStart) +
-    nextSheetViewXml +
-    sheetXml.slice(absoluteStart + sheetViewMatch[0].length)
-  );
+  return replaceNestedXmlTagSource(sheetXml, sheetViewsTag, sheetViewTag, nextSheetViewXml);
 }
 
 function removeFreezePaneFromSheetXml(sheetXml: string): string {
-  const sheetViewsMatch = sheetXml.match(/<sheetViews\b[^>]*>([\s\S]*?)<\/sheetViews>/);
-  if (!sheetViewsMatch || sheetViewsMatch.index === undefined) {
+  const { sheetViewsTag, sheetViewTag } = getSheetViewTags(sheetXml);
+  if (!sheetViewsTag || !sheetViewTag) {
     return sheetXml;
   }
 
-  const sheetViewMatch = sheetViewsMatch[1].match(/<sheetView\b([^>]*?)(?:\/>|>([\s\S]*?)<\/sheetView>)/);
-  if (!sheetViewMatch || sheetViewMatch.index === undefined) {
+  const attributes = parseAttributes(sheetViewTag.attributesSource);
+  ensureXmlAttribute(attributes, "workbookViewId", "0");
+
+  const innerXml = sheetViewTag.innerXml ?? "";
+  const paneTag = findFirstXmlTag(innerXml, "pane");
+  if (!paneTag) {
     return sheetXml;
   }
 
-  const attributes = parseAttributes(sheetViewMatch[1]);
-  if (!attributes.some(([name]) => name === "workbookViewId")) {
-    attributes.push(["workbookViewId", "0"]);
-  }
-
-  const innerXml = sheetViewMatch[2] ?? "";
-  const paneMatch = innerXml.match(/<pane\b([^>]*?)\/>/);
-  if (!paneMatch) {
-    return sheetXml;
-  }
-
-  const activePane = normalizePaneName(getXmlAttr(paneMatch[1], "activePane"));
-  const selections = findXmlTags(innerXml, "selection")
-    .filter((tag) => tag.selfClosing)
-    .map((tag) => ({
-      xml: tag.source,
-      attributes: parseAttributes(tag.attributesSource),
-    }));
+  const activePane = normalizePaneName(getTagAttr(paneTag, "activePane"));
+  const selectionTags = findXmlTags(innerXml, "selection");
+  const selections = selectionTags.map((tag) => ({
+    attributes: parseAttributes(tag.attributesSource),
+    xml: tag.source,
+  }));
   const preferredSelection =
     selections.find((selection) => selection.attributes.find(([name]) => name === "pane")?.[1] === activePane) ??
     selections.find((selection) => selection.attributes.some(([name]) => name === "activeCell" || name === "sqref")) ??
@@ -3572,18 +3606,11 @@ function removeFreezePaneFromSheetXml(sheetXml: string): string {
   const nextSelectionXml = preferredSelection
     ? buildSelectionXml(preferredSelection.attributes.filter(([name]) => name !== "pane"))
     : "";
-  const cleanedInnerXml = innerXml
-    .replace(/<pane\b[^>]*\/>/g, "")
-    .replace(/<selection\b[^>]*\/>/g, "");
-  const nextSheetViewXml = `<sheetView ${serializeAttributes(attributes)}>${nextSelectionXml}${cleanedInnerXml}</sheetView>`;
-  const relativeStart = sheetViewMatch.index;
-  const absoluteStart = sheetViewsMatch.index + sheetViewsMatch[0].indexOf(sheetViewMatch[0], relativeStart);
+  const cleanedInnerXml = removeXmlTagsFromInnerXml(innerXml, [paneTag, ...selectionTags]);
+  const serializedAttributes = serializeAttributes(attributes);
+  const nextSheetViewXml = `<sheetView${serializedAttributes ? ` ${serializedAttributes}` : ""}>${nextSelectionXml}${cleanedInnerXml}</sheetView>`;
 
-  return (
-    sheetXml.slice(0, absoluteStart) +
-    nextSheetViewXml +
-    sheetXml.slice(absoluteStart + sheetViewMatch[0].length)
-  );
+  return replaceNestedXmlTagSource(sheetXml, sheetViewsTag, sheetViewTag, nextSheetViewXml);
 }
 
 function upsertSheetSelectionInSheetXml(
@@ -3598,9 +3625,9 @@ function upsertSheetSelectionInSheetXml(
     ["activeCell", activeCell],
     ["sqref", range],
   ]);
-  const sheetViewsMatch = sheetXml.match(/<sheetViews\b[^>]*>([\s\S]*?)<\/sheetViews>/);
+  const { sheetViewsTag, sheetViewTag } = getSheetViewTags(sheetXml);
 
-  if (!sheetViewsMatch || sheetViewsMatch.index === undefined) {
+  if (!sheetViewsTag) {
     const insertionIndex = findWorksheetChildInsertionIndex(sheetXml, SHEET_VIEWS_FOLLOWING_TAGS);
     return (
       sheetXml.slice(0, insertionIndex) +
@@ -3609,43 +3636,47 @@ function upsertSheetSelectionInSheetXml(
     );
   }
 
-  const sheetViewMatch = sheetViewsMatch[1].match(/<sheetView\b([^>]*?)(?:\/>|>([\s\S]*?)<\/sheetView>)/);
-  if (!sheetViewMatch || sheetViewMatch.index === undefined) {
-    return (
-      sheetXml.slice(0, sheetViewsMatch.index) +
-      `<sheetViews><sheetView workbookViewId="0">${nextSelectionXml}</sheetView></sheetViews>` +
-      sheetXml.slice(sheetViewsMatch.index + sheetViewsMatch[0].length)
+  if (!sheetViewTag) {
+    return replaceXmlTagSource(
+      sheetXml,
+      sheetViewsTag,
+      `<sheetViews><sheetView workbookViewId="0">${nextSelectionXml}</sheetView></sheetViews>`,
     );
   }
 
-  const attributes = parseAttributes(sheetViewMatch[1]);
-  if (!attributes.some(([name]) => name === "workbookViewId")) {
-    attributes.push(["workbookViewId", "0"]);
+  const attributes = parseAttributes(sheetViewTag.attributesSource);
+  ensureXmlAttribute(attributes, "workbookViewId", "0");
+
+  const innerXml = sheetViewTag.innerXml ?? "";
+  const selectionTags = findXmlTags(innerXml, "selection");
+  let replaced = false;
+  let cursor = 0;
+  let nextInnerXml = "";
+
+  for (const selectionTag of selectionTags) {
+    nextInnerXml += innerXml.slice(cursor, selectionTag.start);
+    const selectionPane = normalizePaneName(getTagAttr(selectionTag, "pane"));
+    const matchesTargetPane = selectionPane === targetPane;
+
+    if (matchesTargetPane || (!replaced && targetPane === null && selectionPane === null)) {
+      replaced = true;
+      nextInnerXml += nextSelectionXml;
+    } else {
+      nextInnerXml += selectionTag.source;
+    }
+
+    cursor = selectionTag.end;
   }
 
-  const innerXml = sheetViewMatch[2] ?? "";
-  let replaced = false;
-  const nextInnerXml =
-    innerXml.replace(/<selection\b([^>]*?)\/>/g, (match, attributesSource) => {
-      const selectionPane = normalizePaneName(getXmlAttr(attributesSource, "pane"));
-      const matchesTargetPane = selectionPane === targetPane;
+  nextInnerXml += innerXml.slice(cursor);
+  if (!replaced) {
+    nextInnerXml += nextSelectionXml;
+  }
 
-      if (matchesTargetPane || (!replaced && targetPane === null && selectionPane === null)) {
-        replaced = true;
-        return nextSelectionXml;
-      }
+  const serializedAttributes = serializeAttributes(attributes);
+  const nextSheetViewXml = `<sheetView${serializedAttributes ? ` ${serializedAttributes}` : ""}>${nextInnerXml}</sheetView>`;
 
-      return match;
-    }) + (!replaced ? nextSelectionXml : "");
-  const nextSheetViewXml = `<sheetView ${serializeAttributes(attributes)}>${nextInnerXml}</sheetView>`;
-  const relativeStart = sheetViewMatch.index;
-  const absoluteStart = sheetViewsMatch.index + sheetViewsMatch[0].indexOf(sheetViewMatch[0], relativeStart);
-
-  return (
-    sheetXml.slice(0, absoluteStart) +
-    nextSheetViewXml +
-    sheetXml.slice(absoluteStart + sheetViewMatch[0].length)
-  );
+  return replaceNestedXmlTagSource(sheetXml, sheetViewsTag, sheetViewTag, nextSheetViewXml);
 }
 
 function upsertAutoFilterInSheetXml(sheetXml: string, range: string): string {
@@ -3907,10 +3938,11 @@ function buildExternalHyperlinkXml(address: string, relationshipId: string, tool
 
 function upsertHyperlinkInSheetXml(sheetXml: string, hyperlinkXml: string, address: string): string {
   const normalizedAddress = normalizeCellAddress(address);
-  const hyperlinksMatch = sheetXml.match(/<hyperlinks\b[^>]*>([\s\S]*?)<\/hyperlinks>/);
+  const hyperlinksTag = findFirstXmlTag(sheetXml, "hyperlinks");
+  const hyperlinksInnerXml = hyperlinksTag?.innerXml ?? "";
 
-  const hyperlinks = (hyperlinksMatch
-    ? findXmlTags(hyperlinksMatch[1], "hyperlink").map((tag) => {
+  const hyperlinks = (hyperlinksInnerXml
+    ? findXmlTags(hyperlinksInnerXml, "hyperlink").map((tag) => {
         const ref = getTagAttr(tag, "ref");
         return {
           address: ref ? normalizeCellAddress(ref) : "",
@@ -3924,12 +3956,8 @@ function upsertHyperlinkInSheetXml(sheetXml: string, hyperlinkXml: string, addre
 
   const nextHyperlinksXml = `<hyperlinks>${hyperlinks.map((hyperlink) => hyperlink.xml).join("")}</hyperlinks>`;
 
-  if (hyperlinksMatch && hyperlinksMatch.index !== undefined) {
-    return (
-      sheetXml.slice(0, hyperlinksMatch.index) +
-      nextHyperlinksXml +
-      sheetXml.slice(hyperlinksMatch.index + hyperlinksMatch[0].length)
-    );
+  if (hyperlinksTag) {
+    return replaceXmlTagSource(sheetXml, hyperlinksTag, nextHyperlinksXml);
   }
 
   const closingTag = "</worksheet>";
@@ -3943,12 +3971,12 @@ function upsertHyperlinkInSheetXml(sheetXml: string, hyperlinkXml: string, addre
 
 function removeHyperlinkFromSheetXml(sheetXml: string, address: string): string {
   const normalizedAddress = normalizeCellAddress(address);
-  const hyperlinksMatch = sheetXml.match(/<hyperlinks\b[^>]*>([\s\S]*?)<\/hyperlinks>/);
-  if (!hyperlinksMatch || hyperlinksMatch.index === undefined) {
+  const hyperlinksTag = findFirstXmlTag(sheetXml, "hyperlinks");
+  if (!hyperlinksTag) {
     return sheetXml;
   }
 
-  const keptHyperlinks = findXmlTags(hyperlinksMatch[1], "hyperlink")
+  const keptHyperlinks = findXmlTags(hyperlinksTag.innerXml ?? "", "hyperlink")
     .map((tag) => {
       const ref = getTagAttr(tag, "ref");
       return {
@@ -3963,11 +3991,7 @@ function removeHyperlinkFromSheetXml(sheetXml: string, address: string): string 
       ? ""
       : `<hyperlinks>${keptHyperlinks.map((hyperlink) => hyperlink.xml).join("")}</hyperlinks>`;
 
-  return (
-    sheetXml.slice(0, hyperlinksMatch.index) +
-    nextHyperlinksXml +
-    sheetXml.slice(hyperlinksMatch.index + hyperlinksMatch[0].length)
-  );
+  return replaceXmlTagSource(sheetXml, hyperlinksTag, nextHyperlinksXml);
 }
 
 function getSheetRelationshipsPath(sheetPath: string): string {
@@ -4261,7 +4285,8 @@ function buildFreezePaneSelectionsXml(columnCount: number, rowCount: number): st
 }
 
 function parseSheetSelectionEntries(sheetXml: string): SheetSelection[] {
-  return findXmlTags(sheetXml, "selection").map((tag) => {
+  const { sheetViewTag } = getSheetViewTags(sheetXml);
+  return findXmlTags(sheetViewTag?.innerXml ?? sheetXml, "selection").map((tag) => {
     const activeCell = getTagAttr(tag, "activeCell");
     const sqref = getTagAttr(tag, "sqref");
 

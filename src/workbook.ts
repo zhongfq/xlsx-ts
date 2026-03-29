@@ -845,16 +845,17 @@ export class Workbook {
   ): void {
     const sheetXml = this.readEntryText(path);
     let changed = false;
-    const nextSheetXml = sheetXml.replace(/<f\b([^>]*)>([\s\S]*?)<\/f>/g, (match, attributesSource, formulaSource) => {
-      const formula = decodeXmlText(formulaSource);
+    const nextSheetXml = rewriteXmlTagsByName(sheetXml, "f", (formulaTag) => {
+      const formula = decodeXmlText(formulaTag.innerXml ?? "");
       const nextFormula = transformFormula(formula);
 
       if (nextFormula === formula) {
-        return match;
+        return formulaTag.source;
       }
 
       changed = true;
-      return `<f${attributesSource}>${escapeXmlText(nextFormula)}</f>`;
+      const serializedAttributes = serializeAttributes(parseAttributes(formulaTag.attributesSource));
+      return `<f${serializedAttributes ? ` ${serializedAttributes}` : ""}>${escapeXmlText(nextFormula)}</f>`;
     });
 
     if (changed) {
@@ -869,18 +870,18 @@ export class Workbook {
   ): void {
     const sheetXml = this.readEntryText(path);
     let changed = false;
-    const nextSheetXml = sheetXml.replace(/<hyperlink\b([^>]*?)\/>/g, (match, attributesSource) => {
-      const attributes = parseAttributes(attributesSource);
+    const nextSheetXml = rewriteXmlTagsByName(sheetXml, "hyperlink", (hyperlinkTag) => {
+      const attributes = parseAttributes(hyperlinkTag.attributesSource);
       const locationIndex = attributes.findIndex(([name]) => name === "location");
 
       if (locationIndex === -1) {
-        return match;
+        return hyperlinkTag.source;
       }
 
       const location = attributes[locationIndex]?.[1] ?? "";
       const nextLocation = renameHyperlinkLocation(location, currentSheetName, nextSheetName);
       if (nextLocation === location) {
-        return match;
+        return hyperlinkTag.source;
       }
 
       changed = true;
@@ -2503,6 +2504,29 @@ function parseDefinedNames(workbookXml: string, sheets: Sheet[]): DefinedName[] 
 
 function replaceXmlTagSource(xml: string, tag: XmlTag, nextSource: string): string {
   return xml.slice(0, tag.start) + nextSource + xml.slice(tag.end);
+}
+
+function rewriteXmlTagsByName(
+  xml: string,
+  tagName: string,
+  rewriteTag: (tag: XmlTag) => string,
+): string {
+  const tags = findXmlTags(xml, tagName);
+  if (tags.length === 0) {
+    return xml;
+  }
+
+  let nextXml = "";
+  let cursor = 0;
+
+  for (const tag of tags) {
+    nextXml += xml.slice(cursor, tag.start);
+    nextXml += rewriteTag(tag);
+    cursor = tag.end;
+  }
+
+  nextXml += xml.slice(cursor);
+  return nextXml;
 }
 
 function getXmlTagInnerStart(tag: XmlTag): number {

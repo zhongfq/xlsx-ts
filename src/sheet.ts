@@ -1438,16 +1438,16 @@ export class Sheet {
   private rewriteFormulaTexts(transformFormula: (formula: string) => string): void {
     const sheetXml = this.getSheetIndex().xml;
     let changed = false;
-    const nextSheetXml = sheetXml.replace(/<f\b([^>]*)>([\s\S]*?)<\/f>/g, (match, attributesSource, formulaSource) => {
-      const formula = decodeXmlText(formulaSource);
+    const nextSheetXml = rewriteXmlTagsByName(sheetXml, "f", (formulaTag) => {
+      const formula = decodeXmlText(formulaTag.innerXml ?? "");
       const nextFormula = transformFormula(formula);
 
       if (nextFormula === formula) {
-        return match;
+        return formulaTag.source;
       }
 
       changed = true;
-      return `<f${attributesSource}>${escapeXmlText(nextFormula)}</f>`;
+      return buildXmlElement("f", parseAttributes(formulaTag.attributesSource), escapeXmlText(nextFormula));
     });
 
     if (changed) {
@@ -2062,8 +2062,8 @@ function transformCellXml(
   const innerEnd = cellXml.lastIndexOf("</c>");
   let nextInnerXml = cellXml.slice(innerStart, innerEnd);
 
-  nextInnerXml = nextInnerXml.replace(/<f\b([^>]*)>([\s\S]*?)<\/f>/g, (_match, attributesSource, formulaSource) => {
-    const formulaAttributes = parseAttributes(attributesSource);
+  nextInnerXml = rewriteXmlTagsByName(nextInnerXml, "f", (formulaTag) => {
+    const formulaAttributes = parseAttributes(formulaTag.attributesSource);
     const nextFormulaAttributes = formulaAttributes.map(([name, value]) => {
       if (name === "ref") {
         return [
@@ -2082,7 +2082,7 @@ function transformCellXml(
     });
     const serializedAttributes = serializeAttributes(nextFormulaAttributes);
     const shiftedFormula = shiftFormulaReferences(
-      decodeXmlText(formulaSource),
+      decodeXmlText(formulaTag.innerXml ?? ""),
       sheetName,
       targetColumnNumber,
       columnCount,
@@ -2210,8 +2210,8 @@ function deleteTransformCellInnerXml(
   const innerEnd = cellXml.lastIndexOf("</c>");
   let nextInnerXml = cellXml.slice(innerStart, innerEnd);
 
-  nextInnerXml = nextInnerXml.replace(/<f\b([^>]*)>([\s\S]*?)<\/f>/g, (_match, attributesSource, formulaSource) => {
-    const formulaAttributes = parseAttributes(attributesSource);
+  nextInnerXml = rewriteXmlTagsByName(nextInnerXml, "f", (formulaTag) => {
+    const formulaAttributes = parseAttributes(formulaTag.attributesSource);
     const nextFormulaAttributes = formulaAttributes.map(([name, value]) => {
       if (name === "ref") {
         const nextRange = deleteRangeRef(
@@ -2229,7 +2229,7 @@ function deleteTransformCellInnerXml(
     });
 
     const nextFormula = deleteFormulaReferences(
-      decodeXmlText(formulaSource),
+      decodeXmlText(formulaTag.innerXml ?? ""),
       sheetName,
       targetColumnNumber,
       columnCount,
@@ -3475,6 +3475,29 @@ function removeXmlTagsFromInnerXml(innerXml: string, tags: XmlTag[]): string {
       (currentXml, tag) => currentXml.slice(0, tag.start) + currentXml.slice(tag.end),
       innerXml,
     );
+}
+
+function rewriteXmlTagsByName(
+  xml: string,
+  tagName: string,
+  rewriteTag: (tag: XmlTag) => string,
+): string {
+  const tags = findXmlTags(xml, tagName);
+  if (tags.length === 0) {
+    return xml;
+  }
+
+  let nextXml = "";
+  let cursor = 0;
+
+  for (const tag of tags) {
+    nextXml += xml.slice(cursor, tag.start);
+    nextXml += rewriteTag(tag);
+    cursor = tag.end;
+  }
+
+  nextXml += xml.slice(cursor);
+  return nextXml;
 }
 
 function getSheetViewTags(sheetXml: string): {

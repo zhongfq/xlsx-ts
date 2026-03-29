@@ -1,4 +1,4 @@
-const ATTRIBUTE_REGEX = /([A-Za-z_][\w:.-]*)="([^"]*)"/g;
+const ATTRIBUTE_REGEX = /([A-Za-z_][\w:.-]*)\s*=\s*(["'])([\s\S]*?)\2/g;
 const XML_ENTITY_REGEX = /&(#x[0-9a-fA-F]+|#\d+|lt|gt|quot|apos|amp);/g;
 
 export function escapeXmlText(value: string): string {
@@ -42,16 +42,16 @@ export function decodeXmlText(value: string): string {
 }
 
 export function getXmlAttr(source: string, attributeName: string): string | undefined {
-  const regex = new RegExp(`${escapeRegex(attributeName)}="([^"]*)"`);
+  const regex = new RegExp(`${escapeRegex(attributeName)}\\s*=\\s*(["'])([\\s\\S]*?)\\1`);
   const match = source.match(regex);
-  return match?.[1];
+  return match?.[2];
 }
 
 export function parseAttributes(source: string): Array<[string, string]> {
   const attributes: Array<[string, string]> = [];
 
   for (const match of source.matchAll(ATTRIBUTE_REGEX)) {
-    attributes.push([match[1], match[2]]);
+    attributes.push([match[1], match[3]]);
   }
 
   return attributes;

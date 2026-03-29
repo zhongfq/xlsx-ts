@@ -48,6 +48,30 @@ test("editing a styled cell keeps its style index and leaves styles.xml untouche
   assert.equal(stylesXml, originalStyles);
 });
 
+test("workbook parsing accepts single-quoted XML attributes", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = convertEntriesToSingleQuotedAttributes(await loadFixtureEntries(fixtureDir), [
+    "_rels/.rels",
+    "xl/_rels/workbook.xml.rels",
+    "xl/workbook.xml",
+    "xl/styles.xml",
+    "xl/worksheets/sheet1.xml",
+  ]);
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  assert.equal(workbook.getActiveSheet().name, "Sheet1");
+  assert.equal(sheet.getCell("A1"), "Hello");
+  assert.equal(sheet.getStyleId("A1"), 1);
+  assert.equal(sheet.getStyle("A1")?.fontId, 1);
+
+  sheet.setCell("A1", "World");
+
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.match(sheetXml, /<c r="A1" t="inlineStr" s="1">/);
+  assert.match(sheetXml, /<t>World<\/t>/);
+});
+
 test("sheet reads stay coherent after repeated writes", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = await loadFixtureEntries(fixtureDir);
@@ -3249,6 +3273,26 @@ function replaceEntryText(
   }
 
   return nextEntries;
+}
+
+function convertEntriesToSingleQuotedAttributes(
+  entries: Array<{ path: string; data: Uint8Array }>,
+  paths: string[],
+): Array<{ path: string; data: Uint8Array }> {
+  const encoder = new TextEncoder();
+  const selected = new Set(paths);
+
+  return entries.map((entry) => {
+    if (!selected.has(entry.path)) {
+      return entry;
+    }
+
+    const text = Buffer.from(entry.data).toString("utf8");
+    return {
+      path: entry.path,
+      data: encoder.encode(text.replace(/([A-Za-z_][\w:.-]*)="([^"]*)"/g, "$1='$2'")),
+    };
+  });
 }
 
 function summarizeCellEntries(entries: CellEntry[]): Array<{

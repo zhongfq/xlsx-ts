@@ -401,7 +401,7 @@ function isSelfClosingTagSource(source: string): boolean {
 }
 
 function readXmlAttrFast(source: string, attributeName: string): string | undefined {
-  const pattern = `${attributeName}="`;
+  const pattern = attributeName;
   let searchStart = 0;
 
   while (searchStart < source.length) {
@@ -412,8 +412,30 @@ function readXmlAttrFast(source: string, attributeName: string): string | undefi
 
     const previousCode = attributeStart === 0 ? 32 : source.charCodeAt(attributeStart - 1);
     if (isXmlAttributeBoundaryCode(previousCode)) {
-      const valueStart = attributeStart + pattern.length;
-      const valueEnd = source.indexOf("\"", valueStart);
+      let cursor = attributeStart + pattern.length;
+
+      while (cursor < source.length && isXmlWhitespaceCode(source.charCodeAt(cursor))) {
+        cursor += 1;
+      }
+
+      if (source.charCodeAt(cursor) !== 61) {
+        searchStart = attributeStart + pattern.length;
+        continue;
+      }
+
+      cursor += 1;
+      while (cursor < source.length && isXmlWhitespaceCode(source.charCodeAt(cursor))) {
+        cursor += 1;
+      }
+
+      const quote = source.charCodeAt(cursor);
+      if (quote !== 34 && quote !== 39) {
+        searchStart = attributeStart + pattern.length;
+        continue;
+      }
+
+      const valueStart = cursor + 1;
+      const valueEnd = source.indexOf(String.fromCharCode(quote), valueStart);
       return valueEnd === -1 ? undefined : source.slice(valueStart, valueEnd);
     }
 

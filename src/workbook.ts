@@ -2262,8 +2262,13 @@ function buildEmptyWorksheetXml(): string {
 function getNextSheetId(workbookXml: string): number {
   let nextSheetId = 1;
 
-  for (const match of workbookXml.matchAll(/<sheet\b[^>]*\bsheetId\s*=\s*["'](\d+)["']/g)) {
-    nextSheetId = Math.max(nextSheetId, Number(match[1]) + 1);
+  for (const sheetTag of findXmlTags(workbookXml, "sheet")) {
+    const sheetId = getTagAttr(sheetTag, "sheetId");
+    if (sheetId === undefined) {
+      continue;
+    }
+
+    nextSheetId = Math.max(nextSheetId, Number(sheetId) + 1);
   }
 
   return nextSheetId;
@@ -2272,8 +2277,13 @@ function getNextSheetId(workbookXml: string): number {
 function getNextRelationshipId(relationshipsXml: string): string {
   let nextId = 1;
 
-  for (const match of relationshipsXml.matchAll(/\bId\s*=\s*["']rId(\d+)["']/g)) {
-    nextId = Math.max(nextId, Number(match[1]) + 1);
+  for (const relationshipTag of findXmlTags(relationshipsXml, "Relationship")) {
+    const id = getTagAttr(relationshipTag, "Id");
+    if (!id?.startsWith("rId")) {
+      continue;
+    }
+
+    nextId = Math.max(nextId, Number(id.slice(3)) + 1);
   }
 
   return `rId${nextId}`;
@@ -2753,34 +2763,36 @@ function removeContentTypeOverride(contentTypesXml: string, partPath: string): s
 }
 
 function updateAppSheetNames(appXml: string, sheetNames: string[]): string {
-  const headingPairsMatch = appXml.match(
-    /<HeadingPairs>([\s\S]*?)<\/HeadingPairs>/,
-  );
-  const titlesOfPartsMatch = appXml.match(
-    /<TitlesOfParts>([\s\S]*?)<\/TitlesOfParts>/,
-  );
+  const hasHeadingPairs = findFirstXmlTag(appXml, "HeadingPairs") !== null;
+  const hasTitlesOfParts = findFirstXmlTag(appXml, "TitlesOfParts") !== null;
 
-  if (!headingPairsMatch && !titlesOfPartsMatch) {
+  if (!hasHeadingPairs && !hasTitlesOfParts) {
     return appXml;
   }
 
   let nextAppXml = appXml;
 
-  if (headingPairsMatch) {
+  if (hasHeadingPairs) {
     const nextHeadingPairs =
       `<HeadingPairs><vt:vector size="2" baseType="variant">` +
       `<vt:variant><vt:lpstr>Worksheets</vt:lpstr></vt:variant>` +
       `<vt:variant><vt:i4>${sheetNames.length}</vt:i4></vt:variant>` +
       `</vt:vector></HeadingPairs>`;
-    nextAppXml = nextAppXml.replace(/<HeadingPairs>[\s\S]*?<\/HeadingPairs>/, nextHeadingPairs);
+    const headingPairsTag = findFirstXmlTag(nextAppXml, "HeadingPairs");
+    if (headingPairsTag) {
+      nextAppXml = replaceXmlTagSource(nextAppXml, headingPairsTag, nextHeadingPairs);
+    }
   }
 
-  if (titlesOfPartsMatch) {
+  if (hasTitlesOfParts) {
     const nextTitlesOfParts =
       `<TitlesOfParts><vt:vector size="${sheetNames.length}" baseType="lpstr">` +
       sheetNames.map((sheetName) => `<vt:lpstr>${escapeXmlText(sheetName)}</vt:lpstr>`).join("") +
       `</vt:vector></TitlesOfParts>`;
-    nextAppXml = nextAppXml.replace(/<TitlesOfParts>[\s\S]*?<\/TitlesOfParts>/, nextTitlesOfParts);
+    const titlesOfPartsTag = findFirstXmlTag(nextAppXml, "TitlesOfParts");
+    if (titlesOfPartsTag) {
+      nextAppXml = replaceXmlTagSource(nextAppXml, titlesOfPartsTag, nextTitlesOfParts);
+    }
   }
 
   return nextAppXml;

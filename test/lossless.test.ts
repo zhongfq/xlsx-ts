@@ -357,6 +357,119 @@ test("defined name deletion tolerates single-quoted definedNames tags", async ()
   assert.doesNotMatch(workbookXml, /<definedNames\b/);
 });
 
+test("defined name writers tolerate single-quoted definedName tags", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/workbook.xml",
+    `<?xml version='1.0' encoding='UTF-8' standalone='yes'?>
+<workbook xmlns='http://schemas.openxmlformats.org/spreadsheetml/2006/main' xmlns:r='http://schemas.openxmlformats.org/officeDocument/2006/relationships'>
+  <sheets>
+    <sheet name='Sheet1' sheetId='1' r:id='rId1'/>
+  </sheets>
+  <definedNames>
+    <definedName name='GlobalValue'>Sheet1!$A$1</definedName>
+    <definedName name='LocalValue' localSheetId='0'>$B$2</definedName>
+  </definedNames>
+</workbook>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+
+  workbook.setDefinedName("GlobalValue", "Sheet1!$C$3");
+  workbook.setDefinedName("LocalValue", "$D$4", { scope: "Sheet1" });
+
+  assert.equal(workbook.getDefinedName("GlobalValue"), "Sheet1!$C$3");
+  assert.equal(workbook.getDefinedName("LocalValue", "Sheet1"), "$D$4");
+
+  const workbookXml = entryText(workbook.toEntries(), "xl/workbook.xml");
+  assert.match(workbookXml, /<definedName name="GlobalValue">Sheet1!\$C\$3<\/definedName>/);
+  assert.match(workbookXml, /<definedName name="LocalValue" localSheetId="0">\$D\$4<\/definedName>/);
+});
+
+test("column structure rewrites tolerate single-quoted definedName tags", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    replaceEntryText(
+      await loadFixtureEntries(fixtureDir),
+      "xl/workbook.xml",
+      `<?xml version='1.0' encoding='UTF-8' standalone='yes'?>
+<workbook xmlns='http://schemas.openxmlformats.org/spreadsheetml/2006/main' xmlns:r='http://schemas.openxmlformats.org/officeDocument/2006/relationships'>
+  <sheets>
+    <sheet name='Sheet1' sheetId='1' r:id='rId1'/>
+  </sheets>
+  <definedNames>
+    <definedName name='_xlnm.Print_Area' localSheetId='0'>$A$1:$C$4</definedName>
+    <definedName name='DataRange'>Sheet1!$B$2:$C$4</definedName>
+  </definedNames>
+</workbook>`,
+    ),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version='1.0' encoding='UTF-8' standalone='yes'?>
+<worksheet xmlns='http://schemas.openxmlformats.org/spreadsheetml/2006/main'>
+  <sheetData>
+    <row r='1'>
+      <c r='A1'><v>1</v></c>
+      <c r='B1'><v>2</v></c>
+      <c r='C1'><v>3</v></c>
+    </row>
+  </sheetData>
+</worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+
+  workbook.getSheet("Sheet1").insertColumn(2);
+
+  assert.deepEqual(workbook.getDefinedNames(), [
+    { hidden: false, name: "_xlnm.Print_Area", scope: "Sheet1", value: "$A$1:$D$4" },
+    { hidden: false, name: "DataRange", scope: null, value: "Sheet1!$C$2:$D$4" },
+  ]);
+});
+
+test("sheet metadata rewrites tolerate single-quoted definedName tags", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    withSecondSheet(
+      await loadFixtureEntries(fixtureDir),
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1"><v>2</v></c></row>
+  </sheetData>
+</worksheet>`,
+    ),
+    "xl/workbook.xml",
+    `<?xml version='1.0' encoding='UTF-8' standalone='yes'?>
+<workbook xmlns='http://schemas.openxmlformats.org/spreadsheetml/2006/main' xmlns:r='http://schemas.openxmlformats.org/officeDocument/2006/relationships'>
+  <bookViews><workbookView activeTab='1'/></bookViews>
+  <sheets>
+    <sheet name='Sheet1' sheetId='1' r:id='rId1'/>
+    <sheet name='Sheet2' sheetId='2' r:id='rId3'/>
+  </sheets>
+  <definedNames>
+    <definedName name='ExternalRef'>Sheet1!$A$1</definedName>
+    <definedName name='LocalToSheet1' localSheetId='0'>$A$1</definedName>
+    <definedName name='LocalToSheet2' localSheetId='1'>$A$1</definedName>
+  </definedNames>
+</workbook>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+
+  workbook.renameSheet("Sheet1", "Data");
+  workbook.moveSheet("Sheet2", 0);
+
+  assert.equal(workbook.getActiveSheet().name, "Sheet2");
+  assert.equal(workbook.getDefinedName("ExternalRef"), "Data!$A$1");
+  assert.equal(workbook.getDefinedName("LocalToSheet1", "Data"), "$A$1");
+  assert.equal(workbook.getDefinedName("LocalToSheet2", "Sheet2"), "$A$1");
+
+  workbook.deleteSheet("Sheet2");
+
+  const workbookXml = entryText(workbook.toEntries(), "xl/workbook.xml");
+  assert.match(workbookXml, /<definedName name=['"]ExternalRef['"]>Data!\$A\$1<\/definedName>/);
+  assert.match(workbookXml, /<definedName name="LocalToSheet1" localSheetId="0">\$A\$1<\/definedName>/);
+  assert.doesNotMatch(workbookXml, /LocalToSheet2/);
+});
+
 test("sheet reads stay coherent after repeated writes", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = await loadFixtureEntries(fixtureDir);

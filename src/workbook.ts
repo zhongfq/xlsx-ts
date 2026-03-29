@@ -36,7 +36,7 @@ import { Zip } from "./zip.js";
 import type { WorkbookContext } from "./workbook-context.js";
 import { resolveWorkbookContext } from "./workbook-context.js";
 import { basenamePosix, dirnamePosix } from "./utils/path.js";
-import { findFirstXmlTag, findXmlTags, getTagAttr } from "./utils/xml-read.js";
+import { findFirstXmlTag, findXmlTags, getTagAttr, type XmlTag } from "./utils/xml-read.js";
 import {
   escapeXmlText,
   decodeXmlText,
@@ -532,25 +532,16 @@ export class Workbook {
     const workbookPath = context.workbookPath;
     const workbookXml = this.readEntryText(workbookPath);
     const nextDefinedNameXml = buildDefinedNameXml(name, value, localSheetId);
-    let replaced = false;
-    const nextWorkbookXml = workbookXml.replace(
-      /<definedName\b([^>]*)>([\s\S]*?)<\/definedName>/g,
-      (match, attributesSource) => {
-        const candidateName = getXmlAttr(attributesSource, "name");
-        const candidateLocalSheetId = getXmlAttr(attributesSource, "localSheetId");
-        const candidateScope = candidateLocalSheetId === undefined ? null : Number(candidateLocalSheetId);
+    const replacement = rewriteDefinedNamesInWorkbookXml(workbookXml, (tag) => {
+      const candidateName = getTagAttr(tag, "name");
+      const candidateLocalSheetId = getTagAttr(tag, "localSheetId");
+      const candidateScope = candidateLocalSheetId === undefined ? null : Number(candidateLocalSheetId);
 
-        if (candidateName !== name || candidateScope !== localSheetId) {
-          return match;
-        }
+      return candidateName === name && candidateScope === localSheetId ? nextDefinedNameXml : tag.source;
+    });
 
-        replaced = true;
-        return nextDefinedNameXml;
-      },
-    );
-
-    if (replaced) {
-      this.writeEntryText(workbookPath, nextWorkbookXml);
+    if (replacement.changed) {
+      this.writeEntryText(workbookPath, replacement.workbookXml);
       return;
     }
 
@@ -814,46 +805,37 @@ export class Workbook {
     }
 
     const workbookXml = this.readEntryText(context.workbookPath);
-    let changed = false;
-    const nextWorkbookXml = workbookXml.replace(
-      /<definedName\b([^>]*)>([\s\S]*?)<\/definedName>/g,
-      (match, attributesSource, nameSource) => {
-        const localSheetIdText = getXmlAttr(attributesSource, "localSheetId");
-        const includeUnqualifiedReferences =
-          localSheetIdText !== undefined && Number(localSheetIdText) === localSheetIndex;
-        const nameText = decodeXmlText(nameSource);
-        const nextNameText =
-          mode === "shift"
-            ? shiftFormulaReferences(
-                nameText,
-                sheetName,
-                targetColumnNumber,
-                columnCount,
-                targetRowNumber,
-                rowCount,
-                includeUnqualifiedReferences,
-              )
-            : deleteFormulaReferences(
-                nameText,
-                sheetName,
-                targetColumnNumber,
-                columnCount,
-                targetRowNumber,
-                rowCount,
-                includeUnqualifiedReferences,
-              );
+    const replacement = rewriteDefinedNamesInWorkbookXml(workbookXml, (tag) => {
+      const localSheetIdText = getTagAttr(tag, "localSheetId");
+      const includeUnqualifiedReferences =
+        localSheetIdText !== undefined && Number(localSheetIdText) === localSheetIndex;
+      const nameText = decodeXmlText(tag.innerXml ?? "");
+      const nextNameText =
+        mode === "shift"
+          ? shiftFormulaReferences(
+              nameText,
+              sheetName,
+              targetColumnNumber,
+              columnCount,
+              targetRowNumber,
+              rowCount,
+              includeUnqualifiedReferences,
+            )
+          : deleteFormulaReferences(
+              nameText,
+              sheetName,
+              targetColumnNumber,
+              columnCount,
+              targetRowNumber,
+              rowCount,
+              includeUnqualifiedReferences,
+            );
 
-        if (nextNameText === nameText) {
-          return match;
-        }
+      return nextNameText === nameText ? tag.source : buildDefinedNameTagSource(tag.attributesSource, nextNameText);
+    });
 
-        changed = true;
-        return `<definedName${attributesSource}>${escapeXmlText(nextNameText)}</definedName>`;
-      },
-    );
-
-    if (changed) {
-      this.writeEntryText(context.workbookPath, nextWorkbookXml);
+    if (replacement.changed) {
+      this.writeEntryText(context.workbookPath, replacement.workbookXml);
     }
   }
 
@@ -2487,7 +2469,7 @@ function renameSheetInWorkbookXml(
   currentSheetName: string,
   nextSheetName: string,
 ): string {
-  return workbookXml.replace(
+  const renamedWorkbookXml = workbookXml.replace(
     /<sheet\b([^>]*?)\/>/g,
     (match, attributesSource) => {
       const attributes = parseAttributes(attributesSource);
@@ -2507,16 +2489,13 @@ function renameSheetInWorkbookXml(
       const serializedAttributes = serializeAttributes(nextAttributes);
       return `<sheet ${serializedAttributes}/>`;
     },
-  ).replace(
-    /<definedName\b([^>]*)>([\s\S]*?)<\/definedName>/g,
-    (match, attributesSource, nameSource) => {
-      const nameText = decodeXmlText(nameSource);
-      const nextNameText = renameSheetFormulaReferences(nameText, currentSheetName, nextSheetName);
-      return nextNameText === nameText
-        ? match
-        : `<definedName${attributesSource}>${escapeXmlText(nextNameText)}</definedName>`;
-    },
   );
+
+  return rewriteDefinedNamesInWorkbookXml(renamedWorkbookXml, (tag) => {
+    const nameText = decodeXmlText(tag.innerXml ?? "");
+    const nextNameText = renameSheetFormulaReferences(nameText, currentSheetName, nextSheetName);
+    return nextNameText === nameText ? tag.source : buildDefinedNameTagSource(tag.attributesSource, nextNameText);
+  }).workbookXml;
 }
 
 function reorderWorkbookXmlSheets(
@@ -2548,33 +2527,28 @@ function reorderWorkbookXmlSheets(
     })
     .join("");
   const localSheetIdMap = buildLocalSheetIdMap(currentSheets, nextSheets);
+  const nextWorkbookXml = replaceXmlTagSource(workbookXml, sheetsTag, `<sheets>${reorderedSheetsXml}</sheets>`);
 
-  return workbookXml
-    .replace(/<sheets>[\s\S]*?<\/sheets>/, `<sheets>${reorderedSheetsXml}</sheets>`)
-    .replace(
-      /<definedName\b([^>]*)>([\s\S]*?)<\/definedName>/g,
-      (match, attributesSource, nameSource) => {
-        const attributes = parseAttributes(attributesSource);
-        const localSheetIdIndex = attributes.findIndex(([name]) => name === "localSheetId");
-        if (localSheetIdIndex === -1) {
-          return match;
-        }
+  return rewriteDefinedNamesInWorkbookXml(nextWorkbookXml, (tag) => {
+    const attributes = parseAttributes(tag.attributesSource);
+    const localSheetIdIndex = attributes.findIndex(([name]) => name === "localSheetId");
+    if (localSheetIdIndex === -1) {
+      return tag.source;
+    }
 
-        const localSheetIdText = attributes[localSheetIdIndex]?.[1];
-        if (localSheetIdText === undefined) {
-          return match;
-        }
+    const localSheetIdText = attributes[localSheetIdIndex]?.[1];
+    if (localSheetIdText === undefined) {
+      return tag.source;
+    }
 
-        const nextLocalSheetId = localSheetIdMap.get(Number(localSheetIdText));
-        if (nextLocalSheetId === undefined) {
-          return match;
-        }
+    const nextLocalSheetId = localSheetIdMap.get(Number(localSheetIdText));
+    if (nextLocalSheetId === undefined) {
+      return tag.source;
+    }
 
-        attributes[localSheetIdIndex] = ["localSheetId", String(nextLocalSheetId)];
-        const serializedAttributes = serializeAttributes(attributes);
-        return `<definedName${serializedAttributes ? ` ${serializedAttributes}` : ""}>${nameSource}</definedName>`;
-      },
-    )
+    attributes[localSheetIdIndex] = ["localSheetId", String(nextLocalSheetId)];
+    return buildDefinedNameTagXml(attributes, decodeXmlText(tag.innerXml ?? ""));
+  }).workbookXml
     .replace(
       /<workbookView\b([^>]*?)\/>/g,
       (match, attributesSource) => {
@@ -2726,6 +2700,63 @@ function parseDefinedNames(workbookXml: string, sheets: Sheet[]): DefinedName[] 
     .filter((definedName) => definedName.name.length > 0);
 }
 
+function replaceXmlTagSource(xml: string, tag: XmlTag, nextSource: string): string {
+  return xml.slice(0, tag.start) + nextSource + xml.slice(tag.end);
+}
+
+function buildDefinedNameTagSource(attributesSource: string, value: string): string {
+  return `<definedName${attributesSource ? ` ${attributesSource}` : ""}>${escapeXmlText(value)}</definedName>`;
+}
+
+function buildDefinedNameTagXml(attributes: Array<[string, string]>, value: string): string {
+  const serializedAttributes = serializeAttributes(attributes);
+  return `<definedName${serializedAttributes ? ` ${serializedAttributes}` : ""}>${escapeXmlText(value)}</definedName>`;
+}
+
+function rewriteDefinedNamesInWorkbookXml(
+  workbookXml: string,
+  transform: (tag: XmlTag) => string,
+): { changed: boolean; workbookXml: string } {
+  const definedNamesTag = findFirstXmlTag(workbookXml, "definedNames");
+  if (!definedNamesTag || definedNamesTag.innerXml === null) {
+    return { changed: false, workbookXml };
+  }
+
+  const nextDefinedNameSources: string[] = [];
+  let changed = false;
+
+  for (const definedNameTag of findXmlTags(definedNamesTag.innerXml, "definedName")) {
+    const nextSource = transform(definedNameTag);
+    if (nextSource !== definedNameTag.source) {
+      changed = true;
+    }
+
+    if (nextSource.length > 0) {
+      nextDefinedNameSources.push(nextSource);
+    }
+  }
+
+  if (!changed) {
+    return { changed: false, workbookXml };
+  }
+
+  if (nextDefinedNameSources.length === 0) {
+    return {
+      changed: true,
+      workbookXml: workbookXml.slice(0, definedNamesTag.start) + workbookXml.slice(definedNamesTag.end),
+    };
+  }
+
+  return {
+    changed: true,
+    workbookXml: replaceXmlTagSource(
+      workbookXml,
+      definedNamesTag,
+      `<definedNames>${nextDefinedNameSources.join("")}</definedNames>`,
+    ),
+  };
+}
+
 function buildDefinedNameXml(name: string, value: string, localSheetId: number | null): string {
   const attributes: Array<[string, string]> = [["name", name]];
   if (localSheetId !== null) {
@@ -2750,28 +2781,12 @@ function removeDefinedNameFromWorkbookXml(
   name: string,
   localSheetId: number | null,
 ): string {
-  const definedNamesTag = findFirstXmlTag(workbookXml, "definedNames");
-  if (!definedNamesTag || definedNamesTag.innerXml === null) {
-    return workbookXml;
-  }
-
-  const keptDefinedNames = findXmlTags(definedNamesTag.innerXml, "definedName").filter((tag) => {
+  return rewriteDefinedNamesInWorkbookXml(workbookXml, (tag) => {
     const candidateName = getTagAttr(tag, "name");
     const candidateLocalSheetIdText = getTagAttr(tag, "localSheetId");
     const candidateLocalSheetId = candidateLocalSheetIdText === undefined ? null : Number(candidateLocalSheetIdText);
-    return candidateName !== name || candidateLocalSheetId !== localSheetId;
-  });
-
-  if (keptDefinedNames.length === 0) {
-    return workbookXml.slice(0, definedNamesTag.start) + workbookXml.slice(definedNamesTag.end);
-  }
-
-  const nextDefinedNamesXml = `<definedNames>${keptDefinedNames.map((tag) => tag.source).join("")}</definedNames>`;
-  return (
-    workbookXml.slice(0, definedNamesTag.start) +
-    nextDefinedNamesXml +
-    workbookXml.slice(definedNamesTag.end)
-  );
+    return candidateName === name && candidateLocalSheetId === localSheetId ? "" : tag.source;
+  }).workbookXml;
 }
 
 function removeSheetFromWorkbookXml(
@@ -2785,30 +2800,30 @@ function removeSheetFromWorkbookXml(
     "",
   );
 
-  return withoutSheet.replace(
-    /<definedName\b([^>]*)>([\s\S]*?)<\/definedName>/g,
-    (match, attributesSource, nameSource) => {
-      const attributes = parseAttributes(attributesSource);
-      const localSheetIdIndex = attributes.findIndex(([name]) => name === "localSheetId");
-      const localSheetIdText = localSheetIdIndex === -1 ? undefined : attributes[localSheetIdIndex]?.[1];
+  return rewriteDefinedNamesInWorkbookXml(withoutSheet, (tag) => {
+    const attributes = parseAttributes(tag.attributesSource);
+    const localSheetIdIndex = attributes.findIndex(([name]) => name === "localSheetId");
+    const localSheetIdText = localSheetIdIndex === -1 ? undefined : attributes[localSheetIdIndex]?.[1];
 
-      if (localSheetIdText !== undefined) {
-        const localSheetId = Number(localSheetIdText);
-        if (localSheetId === deletedSheetIndex) {
-          return "";
-        }
-
-        if (localSheetId > deletedSheetIndex) {
-          attributes[localSheetIdIndex] = ["localSheetId", String(localSheetId - 1)];
-        }
+    if (localSheetIdText !== undefined) {
+      const localSheetId = Number(localSheetIdText);
+      if (localSheetId === deletedSheetIndex) {
+        return "";
       }
 
-      const nameText = decodeXmlText(nameSource);
-      const nextNameText = deleteSheetFormulaReferences(nameText, deletedSheetName);
-      const serializedAttributes = serializeAttributes(attributes);
-      return `<definedName${serializedAttributes ? ` ${serializedAttributes}` : ""}>${escapeXmlText(nextNameText)}</definedName>`;
-    },
-  );
+      if (localSheetId > deletedSheetIndex) {
+        attributes[localSheetIdIndex] = ["localSheetId", String(localSheetId - 1)];
+      }
+    }
+
+    const nameText = decodeXmlText(tag.innerXml ?? "");
+    const nextNameText = deleteSheetFormulaReferences(nameText, deletedSheetName);
+    if (nextNameText === nameText && localSheetIdText === undefined) {
+      return tag.source;
+    }
+
+    return buildDefinedNameTagXml(attributes, nextNameText);
+  }).workbookXml;
 }
 
 function renameHyperlinkLocation(

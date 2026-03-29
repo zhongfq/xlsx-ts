@@ -1572,7 +1572,8 @@ export class Sheet {
     const normalizedSheetXml = updateDimensionRef(indexedSheet);
 
     this.workbook.writeEntryText(this.path, normalizedSheetXml);
-    this.sheetIndex = buildSheetIndex(this.workbook, normalizedSheetXml);
+    this.sheetIndex =
+      normalizedSheetXml === nextSheetXml ? indexedSheet : buildSheetIndex(this.workbook, normalizedSheetXml);
     this.revision += 1;
   }
 }

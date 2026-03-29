@@ -1,4 +1,5 @@
 import { XlsxError } from "./errors.js";
+import { parseStringItemText } from "./shared-strings.js";
 import type { CellSnapshot, CellType, CellValue } from "./types.js";
 import type { Workbook } from "./workbook.js";
 import { decodeXmlText } from "./utils/xml.js";
@@ -267,11 +268,11 @@ function parseCellValue(
   workbook: Workbook,
   rawType: string | null,
   valueSource: string | undefined,
-  inlineTextSources: string[] | null,
+  inlineText: string | null,
   hasSelfClosingValue: boolean,
 ): CellValue {
   if (rawType === "inlineStr") {
-    return (inlineTextSources ?? []).map(decodeXmlText).join("");
+    return inlineText ?? "";
   }
 
   if (rawType === "str") {
@@ -311,10 +312,10 @@ function buildCellSnapshot(
 ): CellSnapshot {
   const formulaSource = extractCellFormulaText(innerXml);
   const valueSource = extractCellValueText(innerXml);
-  const inlineTextSources = rawType === "inlineStr" ? extractInlineStringTexts(innerXml) : null;
+  const inlineText = rawType === "inlineStr" ? parseStringItemText(innerXml) : null;
   const hasSelfClosingValue = valueSource === undefined && hasSelfClosingValueTag(innerXml);
   const formula = formulaSource === null ? null : decodeXmlText(formulaSource);
-  const value = parseCellValue(workbook, rawType, valueSource, inlineTextSources, hasSelfClosingValue);
+  const value = parseCellValue(workbook, rawType, valueSource, inlineText, hasSelfClosingValue);
 
   if (formula !== null) {
     return {
@@ -352,10 +353,6 @@ function extractCellFormulaText(innerXml: string): string | null {
 
 function extractCellValueText(innerXml: string): string | undefined {
   return extractTagTextFast(innerXml, "v") ?? undefined;
-}
-
-function extractInlineStringTexts(innerXml: string): string[] {
-  return extractAllTagTextsFast(innerXml, "t");
 }
 
 function hasSelfClosingValueTag(innerXml: string): boolean {
@@ -439,38 +436,6 @@ function extractTagTextFast(xml: string, tagName: string): string | null {
 
   const closeStart = xml.indexOf(`</${tagName}>`, tagOpenEnd + 1);
   return closeStart === -1 ? null : xml.slice(tagOpenEnd + 1, closeStart);
-}
-
-function extractAllTagTextsFast(xml: string, tagName: string): string[] {
-  const texts: string[] = [];
-  let cursor = 0;
-
-  while (cursor < xml.length) {
-    const tagStart = findTagStartFast(xml, tagName, cursor);
-    if (tagStart === -1) {
-      break;
-    }
-
-    const tagOpenEnd = xml.indexOf(">", tagStart + tagName.length + 1);
-    if (tagOpenEnd === -1) {
-      break;
-    }
-
-    if (isSelfClosingTagSource(xml.slice(tagStart + tagName.length + 1, tagOpenEnd))) {
-      cursor = tagOpenEnd + 1;
-      continue;
-    }
-
-    const closeStart = xml.indexOf(`</${tagName}>`, tagOpenEnd + 1);
-    if (closeStart === -1) {
-      break;
-    }
-
-    texts.push(xml.slice(tagOpenEnd + 1, closeStart));
-    cursor = closeStart + tagName.length + 3;
-  }
-
-  return texts;
 }
 
 function hasSelfClosingTagFast(xml: string, tagName: string): boolean {

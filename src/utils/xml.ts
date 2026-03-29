@@ -1,4 +1,5 @@
 const ATTRIBUTE_REGEX = /([A-Za-z_][\w:.-]*)="([^"]*)"/g;
+const XML_ENTITY_REGEX = /&(#x[0-9a-fA-F]+|#\d+|lt|gt|quot|apos|amp);/g;
 
 export function escapeXmlText(value: string): string {
   if (
@@ -22,12 +23,22 @@ export function decodeXmlText(value: string): string {
     return value;
   }
 
-  return value
-    .replaceAll("&lt;", "<")
-    .replaceAll("&gt;", ">")
-    .replaceAll("&quot;", "\"")
-    .replaceAll("&apos;", "'")
-    .replaceAll("&amp;", "&");
+  return value.replace(XML_ENTITY_REGEX, (entity, token: string) => {
+    switch (token) {
+      case "lt":
+        return "<";
+      case "gt":
+        return ">";
+      case "quot":
+        return "\"";
+      case "apos":
+        return "'";
+      case "amp":
+        return "&";
+      default:
+        return decodeNumericXmlEntity(entity, token);
+    }
+  });
 }
 
 export function getXmlAttr(source: string, attributeName: string): string | undefined {
@@ -64,4 +75,20 @@ export function extractAllTagTexts(xml: string, tagName: string): string[] {
     xml.matchAll(new RegExp(`<${tagName}\\b[^>]*>([\\s\\S]*?)</${tagName}>`, "g")),
     (match) => match[1],
   );
+}
+
+function decodeNumericXmlEntity(entity: string, token: string): string {
+  const isHex = token.startsWith("#x");
+  const digits = token.slice(isHex ? 2 : 1);
+  const codePoint = Number.parseInt(digits, isHex ? 16 : 10);
+
+  if (!Number.isInteger(codePoint) || codePoint < 0 || codePoint > 0x10ffff) {
+    return entity;
+  }
+
+  try {
+    return String.fromCodePoint(codePoint);
+  } catch {
+    return entity;
+  }
 }

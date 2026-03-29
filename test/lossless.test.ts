@@ -72,6 +72,31 @@ test("workbook parsing accepts single-quoted XML attributes", async () => {
   assert.match(sheetXml, /<t>World<\/t>/);
 });
 
+test("workbook parsing decodes XML entities inside attribute values", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/workbook.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sales &amp; Ops" sheetId="1" r:id="rId1"/>
+  </sheets>
+  <definedNames>
+    <definedName name="LocalValue" localSheetId="0">$B$2</definedName>
+  </definedNames>
+</workbook>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+
+  assert.deepEqual(workbook.getSheets().map((sheet) => sheet.name), ["Sales & Ops"]);
+  assert.equal(workbook.getSheet("Sales & Ops").getCell("A1"), "Hello");
+  assert.deepEqual(workbook.getDefinedNames(), [
+    { hidden: false, name: "LocalValue", scope: "Sales & Ops", value: "$B$2" },
+  ]);
+  assert.equal(workbook.getDefinedName("LocalValue", "Sales & Ops"), "$B$2");
+});
+
 test("sheet reads stay coherent after repeated writes", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = await loadFixtureEntries(fixtureDir);

@@ -44,14 +44,14 @@ export function decodeXmlText(value: string): string {
 export function getXmlAttr(source: string, attributeName: string): string | undefined {
   const regex = new RegExp(`${escapeRegex(attributeName)}\\s*=\\s*(["'])([\\s\\S]*?)\\1`);
   const match = source.match(regex);
-  return match?.[2];
+  return match ? decodeXmlText(match[2]) : undefined;
 }
 
 export function parseAttributes(source: string): Array<[string, string]> {
   const attributes: Array<[string, string]> = [];
 
   for (const match of source.matchAll(ATTRIBUTE_REGEX)) {
-    attributes.push([match[1], match[3]]);
+    attributes.push([match[1], decodeXmlText(match[3])]);
   }
 
   return attributes;

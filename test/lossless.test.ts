@@ -97,6 +97,102 @@ test("workbook parsing decodes XML entities inside attribute values", async () =
   assert.equal(workbook.getDefinedName("LocalValue", "Sales & Ops"), "$B$2");
 });
 
+test("sheet addTable and removeTable tolerate single-quoted relationship and content-type attributes", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  let entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="inlineStr"><is><t>Name</t></is></c>
+      <c r="B1" t="inlineStr"><is><t>Score</t></is></c>
+    </row>
+    <row r="2">
+      <c r="A2" t="inlineStr"><is><t>Alice</t></is></c>
+      <c r="B2"><v>98</v></c>
+    </row>
+  </sheetData>
+</worksheet>`,
+  );
+  entries = entries.filter((entry) => entry.path !== "xl/worksheets/_rels/sheet1.xml.rels");
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.addTable("A1:B2", { name: "Scores" });
+
+  let relsXml = entryText(workbook.toEntries(), "xl/worksheets/_rels/sheet1.xml.rels");
+  let contentTypesXml = entryText(workbook.toEntries(), "[Content_Types].xml");
+  let sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+
+  relsXml = relsXml.replace(/"/g, "'");
+  contentTypesXml = contentTypesXml.replace(/"/g, "'");
+  sheetXml = sheetXml.replace(/"/g, "'");
+
+  const reparsed = Workbook.fromEntries(
+    replaceEntryText(
+      replaceEntryText(
+        replaceEntryText(workbook.toEntries(), "xl/worksheets/_rels/sheet1.xml.rels", relsXml),
+        "[Content_Types].xml",
+        contentTypesXml,
+      ),
+      "xl/worksheets/sheet1.xml",
+      sheetXml,
+    ),
+  );
+
+  assert.deepEqual(reparsed.getSheet("Sheet1").getTables(), [
+    { name: "Scores", displayName: "Scores", range: "A1:B2", path: "xl/tables/table1.xml" },
+  ]);
+
+  reparsed.getSheet("Sheet1").removeTable("Scores");
+
+  assert.doesNotMatch(entryText(reparsed.toEntries(), "xl/worksheets/sheet1.xml"), /<tableParts\b/);
+  assert.doesNotMatch(entryText(reparsed.toEntries(), "xl/worksheets/_rels/sheet1.xml.rels"), /table1\.xml/);
+  assert.doesNotMatch(entryText(reparsed.toEntries(), "[Content_Types].xml"), /tables\/table1\.xml/);
+});
+
+test("workbook addSheet and deleteSheet tolerate single-quoted workbook metadata attributes", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = convertEntriesToSingleQuotedAttributes(await loadFixtureEntries(fixtureDir), [
+    "xl/workbook.xml",
+    "xl/_rels/workbook.xml.rels",
+    "[Content_Types].xml",
+  ]);
+  const workbook = Workbook.fromEntries(entries);
+
+  workbook.addSheet("Sheet2");
+  assert.deepEqual(workbook.getSheets().map((sheet) => sheet.name), ["Sheet1", "Sheet2"]);
+
+  let workbookXml = entryText(workbook.toEntries(), "xl/workbook.xml");
+  let relsXml = entryText(workbook.toEntries(), "xl/_rels/workbook.xml.rels");
+  let contentTypesXml = entryText(workbook.toEntries(), "[Content_Types].xml");
+
+  workbookXml = workbookXml.replace(/"/g, "'");
+  relsXml = relsXml.replace(/"/g, "'");
+  contentTypesXml = contentTypesXml.replace(/"/g, "'");
+
+  const reparsed = Workbook.fromEntries(
+    replaceEntryText(
+      replaceEntryText(
+        replaceEntryText(workbook.toEntries(), "xl/workbook.xml", workbookXml),
+        "xl/_rels/workbook.xml.rels",
+        relsXml,
+      ),
+      "[Content_Types].xml",
+      contentTypesXml,
+    ),
+  );
+
+  reparsed.deleteSheet("Sheet2");
+
+  assert.deepEqual(reparsed.getSheets().map((sheet) => sheet.name), ["Sheet1"]);
+  assert.doesNotMatch(entryText(reparsed.toEntries(), "xl/workbook.xml"), /Sheet2/);
+  assert.doesNotMatch(entryText(reparsed.toEntries(), "xl/_rels/workbook.xml.rels"), /sheet2\.xml/);
+  assert.doesNotMatch(entryText(reparsed.toEntries(), "[Content_Types].xml"), /worksheets\/sheet2\.xml/);
+});
+
 test("sheet reads stay coherent after repeated writes", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = await loadFixtureEntries(fixtureDir);

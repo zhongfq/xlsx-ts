@@ -1455,7 +1455,7 @@ export class Sheet {
 
   private getTableReferences(): TableReference[] {
     const sheetRelationshipIds = Array.from(
-      this.getSheetIndex().xml.matchAll(/<tablePart\b[^>]*\br:id="([^"]+)"[^>]*\/>/g),
+      this.getSheetIndex().xml.matchAll(/<tablePart\b[^>]*\br:id\s*=\s*["']([^"']+)["'][^>]*\/>/g),
       (match) => match[1],
     );
     if (sheetRelationshipIds.length === 0) {
@@ -3297,7 +3297,7 @@ function parseMergedRanges(sheetXml: string): string[] {
   }
 
   return Array.from(
-    mergeCellsMatch[1].matchAll(/<mergeCell\b[^>]*\bref="([^"]+)"[^>]*\/>/g),
+    mergeCellsMatch[1].matchAll(/<mergeCell\b[^>]*\bref\s*=\s*["']([^"']+)["'][^>]*\/>/g),
     (match) => normalizeRangeRef(match[1]),
   );
 }
@@ -4060,7 +4060,7 @@ function buildTableColumnNames(headerValues: CellValue[], width: number): string
 function getNextRelationshipIdFromXml(relationshipsXml: string): string {
   let nextId = 1;
 
-  for (const match of relationshipsXml.matchAll(/\bId="rId(\d+)"/g)) {
+  for (const match of relationshipsXml.matchAll(/\bId\s*=\s*["']rId(\d+)["']/g)) {
     nextId = Math.max(nextId, Number(match[1]) + 1);
   }
 
@@ -4101,7 +4101,9 @@ function upsertRelationship(
   targetMode?: string,
 ): string {
   const nextRelationshipXml = buildRelationshipXml(relationshipId, type, target, targetMode);
-  const relationshipRegex = new RegExp(`<Relationship\\b[^>]*\\bId="${escapeRegex(relationshipId)}"[^>]*/>`);
+  const relationshipRegex = new RegExp(
+    `<Relationship\\b[^>]*\\bId\\s*=\\s*["']${escapeRegex(relationshipId)}["'][^>]*/>`,
+  );
 
   return relationshipRegex.test(relationshipsXml)
     ? relationshipsXml.replace(relationshipRegex, nextRelationshipXml)
@@ -4110,7 +4112,7 @@ function upsertRelationship(
 
 function removeRelationshipById(relationshipsXml: string, relationshipId: string): string {
   return relationshipsXml.replace(
-    new RegExp(`<Relationship\\b[^>]*\\bId="${escapeRegex(relationshipId)}"[^>]*/>`),
+    new RegExp(`<Relationship\\b[^>]*\\bId\\s*=\\s*["']${escapeRegex(relationshipId)}["'][^>]*/>`),
     "",
   );
 }
@@ -4310,7 +4312,7 @@ function parseOptionalXmlBoolean(value: string | undefined): boolean | null {
 }
 
 function addContentTypeOverride(contentTypesXml: string, partPath: string, contentType: string): string {
-  if (new RegExp(`PartName="/${escapeRegex(partPath)}"`).test(contentTypesXml)) {
+  if (new RegExp(`PartName\\s*=\\s*["']/${escapeRegex(partPath)}["']`).test(contentTypesXml)) {
     return contentTypesXml;
   }
 
@@ -4329,7 +4331,7 @@ function addContentTypeOverride(contentTypesXml: string, partPath: string, conte
 
 function removeContentTypeOverride(contentTypesXml: string, partPath: string): string {
   return contentTypesXml.replace(
-    new RegExp(`<Override\\b[^>]*\\bPartName="/${escapeRegex(partPath)}"[^>]*/>`),
+    new RegExp(`<Override\\b[^>]*\\bPartName\\s*=\\s*["']/${escapeRegex(partPath)}["'][^>]*/>`),
     "",
   );
 }

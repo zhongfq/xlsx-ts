@@ -2435,7 +2435,7 @@ function buildEmptyWorksheetXml(): string {
 function getNextSheetId(workbookXml: string): number {
   let nextSheetId = 1;
 
-  for (const match of workbookXml.matchAll(/<sheet\b[^>]*\bsheetId="(\d+)"/g)) {
+  for (const match of workbookXml.matchAll(/<sheet\b[^>]*\bsheetId\s*=\s*["'](\d+)["']/g)) {
     nextSheetId = Math.max(nextSheetId, Number(match[1]) + 1);
   }
 
@@ -2445,7 +2445,7 @@ function getNextSheetId(workbookXml: string): number {
 function getNextRelationshipId(relationshipsXml: string): string {
   let nextId = 1;
 
-  for (const match of relationshipsXml.matchAll(/\bId="rId(\d+)"/g)) {
+  for (const match of relationshipsXml.matchAll(/\bId\s*=\s*["']rId(\d+)["']/g)) {
     nextId = Math.max(nextId, Number(match[1]) + 1);
   }
 
@@ -2787,7 +2787,7 @@ function removeSheetFromWorkbookXml(
   deletedSheetIndex: number,
 ): string {
   const withoutSheet = workbookXml.replace(
-    new RegExp(`<sheet\\b[^>]*\\br:id="${escapeRegex(relationshipId)}"[^>]*/>`),
+    new RegExp(`<sheet\\b[^>]*\\br:id\\s*=\\s*["']${escapeRegex(relationshipId)}["'][^>]*/>`),
     "",
   );
 
@@ -2845,14 +2845,14 @@ function renameHyperlinkLocation(
 
 function removeRelationshipById(relationshipsXml: string, relationshipId: string): string {
   return relationshipsXml.replace(
-    new RegExp(`<Relationship\\b[^>]*\\bId="${escapeRegex(relationshipId)}"[^>]*/>`),
+    new RegExp(`<Relationship\\b[^>]*\\bId\\s*=\\s*["']${escapeRegex(relationshipId)}["'][^>]*/>`),
     "",
   );
 }
 
 function removeContentTypeOverride(contentTypesXml: string, partPath: string): string {
   return contentTypesXml.replace(
-    new RegExp(`<Override\\b[^>]*\\bPartName="/${escapeRegex(partPath)}"[^>]*/>`),
+    new RegExp(`<Override\\b[^>]*\\bPartName\\s*=\\s*["']/${escapeRegex(partPath)}["'][^>]*/>`),
     "",
   );
 }

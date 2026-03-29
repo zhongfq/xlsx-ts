@@ -1738,22 +1738,28 @@ function buildRowAttributesWithStyle(
 }
 
 function parseColumnDefinitions(sheetXml: string): ColumnDefinition[] {
-  const colsMatch = sheetXml.match(/<cols\b[^>]*>([\s\S]*?)<\/cols>/);
-  if (!colsMatch) {
+  const colsTag = findFirstXmlTag(sheetXml, "cols");
+  if (!colsTag || colsTag.innerXml === null) {
     return [];
   }
 
-  return Array.from(colsMatch[1].matchAll(/<col\b([^>]*?)\/>/g), (match) => {
-    const attributes = parseAttributes(match[1]);
-    const min = Number(getXmlAttr(match[1], "min") ?? "0");
-    const max = Number(getXmlAttr(match[1], "max") ?? "0");
+  return findXmlTags(colsTag.innerXml, "col").map((colTag) => {
+    const attributes = parseAttributes(colTag.attributesSource);
+    const min = Number(getTagAttr(colTag, "min") ?? "0");
+    const max = Number(getTagAttr(colTag, "max") ?? "0");
 
     return {
       min,
       max,
       attributes,
     };
-  }).filter((definition) => Number.isInteger(definition.min) && Number.isInteger(definition.max) && definition.min > 0 && definition.max >= definition.min);
+  }).filter(
+    (definition) =>
+      Number.isInteger(definition.min) &&
+      Number.isInteger(definition.max) &&
+      definition.min > 0 &&
+      definition.max >= definition.min,
+  );
 }
 
 function updateColumnStyleIdInSheetXml(
@@ -1851,18 +1857,18 @@ function transformColumnStyleDefinitions(
 }
 
 function replaceColumnDefinitions(sheetXml: string, definitions: ColumnDefinition[]): string {
-  const colsMatch = sheetXml.match(/<cols\b[^>]*>[\s\S]*?<\/cols>/);
+  const colsTag = findFirstXmlTag(sheetXml, "cols");
   const colsXml =
     definitions.length === 0
       ? ""
-      : `<cols>${definitions.map((definition) => serializeColumnDefinition(definition)).join("")}</cols>`;
+      : buildXmlContainer(
+          "cols",
+          colsTag?.attributesSource ?? "",
+          definitions.map((definition) => serializeColumnDefinition(definition)).join(""),
+        );
 
-  if (colsMatch && colsMatch.index !== undefined) {
-    return (
-      sheetXml.slice(0, colsMatch.index) +
-      colsXml +
-      sheetXml.slice(colsMatch.index + colsMatch[0].length)
-    );
+  if (colsTag) {
+    return replaceXmlTagSource(sheetXml, colsTag, colsXml);
   }
 
   if (definitions.length === 0) {
@@ -3310,30 +3316,25 @@ function parseMergedRanges(sheetXml: string): string[] {
 
 function updateMergedRanges(sheetXml: string, ranges: string[]): string {
   const normalizedRanges = [...new Set(ranges.map(normalizeRangeRef))].sort(compareRangeRefs);
-  const existingMergeCellsMatch = sheetXml.match(/<mergeCells\b[^>]*>[\s\S]*?<\/mergeCells>/);
+  const mergeCellsTag = findFirstXmlTag(sheetXml, "mergeCells");
 
   if (normalizedRanges.length === 0) {
-    if (!existingMergeCellsMatch || existingMergeCellsMatch.index === undefined) {
+    if (!mergeCellsTag) {
       return sheetXml;
     }
 
-    return (
-      sheetXml.slice(0, existingMergeCellsMatch.index) +
-      sheetXml.slice(existingMergeCellsMatch.index + existingMergeCellsMatch[0].length)
-    );
+    return replaceXmlTagSource(sheetXml, mergeCellsTag, "");
   }
 
-  const mergeCellsXml =
-    `<mergeCells count="${normalizedRanges.length}">` +
-    normalizedRanges.map((range) => `<mergeCell ref="${range}"/>`).join("") +
-    `</mergeCells>`;
+  const mergeCellsXml = buildCountedXmlContainer(
+    "mergeCells",
+    mergeCellsTag?.attributesSource ?? "",
+    "count",
+    normalizedRanges.map((range) => `<mergeCell ref="${range}"/>`),
+  );
 
-  if (existingMergeCellsMatch && existingMergeCellsMatch.index !== undefined) {
-    return (
-      sheetXml.slice(0, existingMergeCellsMatch.index) +
-      mergeCellsXml +
-      sheetXml.slice(existingMergeCellsMatch.index + existingMergeCellsMatch[0].length)
-    );
+  if (mergeCellsTag) {
+    return replaceXmlTagSource(sheetXml, mergeCellsTag, mergeCellsXml);
   }
 
   const sheetDataCloseTag = "</sheetData>";
@@ -3511,6 +3512,11 @@ function buildCountedXmlContainer(
 
   const serializedAttributes = serializeAttributes(nextAttributes);
   return `<${tagName}${serializedAttributes ? ` ${serializedAttributes}` : ""}>${childXml.join("")}</${tagName}>`;
+}
+
+function buildXmlContainer(tagName: string, attributesSource: string, innerXml: string): string {
+  const serializedAttributes = serializeAttributes(parseAttributes(attributesSource));
+  return `<${tagName}${serializedAttributes ? ` ${serializedAttributes}` : ""}>${innerXml}</${tagName}>`;
 }
 
 function buildXmlElement(tagName: string, attributes: Array<[string, string]>, innerXml: string): string {

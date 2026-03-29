@@ -3071,6 +3071,52 @@ test("merged range APIs patch mergeCells without touching unrelated parts", asyn
   assert.doesNotMatch(sheetXml, /<mergeCells\b/);
 });
 
+test("column and merged range writers tolerate single-quoted container tags", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = convertEntriesToSingleQuotedAttributes(
+    replaceEntryText(
+      await loadFixtureEntries(fixtureDir),
+      "xl/worksheets/sheet1.xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cols outlineLevelCol='1'>
+    <col min='1' max='2' style='1'/>
+    <col min='4' max='4' style='3' hidden='1'/>
+  </cols>
+  <sheetData>
+    <row r='1'>
+      <c r='A1' t='inlineStr'><is><t>Hello</t></is></c>
+      <c r='D1'><v>4</v></c>
+    </row>
+  </sheetData>
+  <mergeCells count='1'><mergeCell ref='B2:C2'/></mergeCells>
+</worksheet>`,
+    ),
+    ["xl/worksheets/sheet1.xml"],
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  assert.deepEqual(sheet.getMergedRanges(), ["B2:C2"]);
+  assert.equal(sheet.getColumnStyleId("A"), 1);
+  assert.equal(sheet.getColumnStyleId("D"), 3);
+
+  sheet.setColumnStyleId("B", 5);
+  sheet.insertColumn("C");
+  sheet.addMergedRange("E5:D4");
+  sheet.removeMergedRange("B2:D2");
+
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.equal(sheet.getColumnStyleId("B"), 5);
+  assert.equal(sheet.getColumnStyleId("E"), 3);
+  assert.deepEqual(sheet.getMergedRanges(), ["D4:E5"]);
+  assert.match(
+    sheetXml,
+    /<cols outlineLevelCol="1"><col min="1" max="1" style="1"\/><col min="2" max="2" style="5"\/><col min="5" max="5" style="3" hidden="1"\/><\/cols>/,
+  );
+  assert.match(sheetXml, /<mergeCells count="1"><mergeCell ref="D4:E5"\/><\/mergeCells>/);
+});
+
 test("writing cells keeps worksheet dimension ref in sync", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = replaceEntryText(

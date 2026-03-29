@@ -3759,6 +3759,98 @@ test("sheet dataValidation APIs read, write, shift, and remove validations", asy
   assert.doesNotMatch(sheetXml, /<dataValidations\b/);
 });
 
+test("sheet autoFilter and dataValidation APIs tolerate single-quoted worksheet tags", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = convertEntriesToSingleQuotedAttributes(
+    replaceEntryText(
+      await loadFixtureEntries(fixtureDir),
+      "xl/worksheets/sheet1.xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>2</v></c><c r="C1"><v>3</v></c></row>
+    <row r="2"><c r="A2"><v>4</v></c><c r="B2"><v>5</v></c><c r="C2"><v>6</v></c></row>
+  </sheetData>
+  <autoFilter ref="A1:C2"/>
+  <dataValidations count="1">
+    <dataValidation sqref="A2" type="whole" allowBlank="1">
+      <formula1>1</formula1>
+    </dataValidation>
+  </dataValidations>
+</worksheet>`,
+    ),
+    ["xl/worksheets/sheet1.xml"],
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  assert.equal(sheet.getAutoFilter(), "A1:C2");
+  assert.deepEqual(sheet.getDataValidations(), [
+    {
+      range: "A2",
+      type: "whole",
+      operator: null,
+      allowBlank: true,
+      showInputMessage: null,
+      showErrorMessage: null,
+      showDropDown: null,
+      errorStyle: null,
+      errorTitle: null,
+      error: null,
+      promptTitle: null,
+      prompt: null,
+      imeMode: null,
+      formula1: "1",
+      formula2: null,
+    },
+  ]);
+
+  sheet.setAutoFilter("A1:D2");
+  sheet.setDataValidation("C2", {
+    type: "list",
+    showDropDown: false,
+    formula1: "\"Yes,No\"",
+  });
+
+  let sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.match(sheetXml, /<autoFilter ref="A1:D2"\/>/);
+  assert.match(sheetXml, /<dataValidations count="2">/);
+  assert.match(
+    sheetXml,
+    /<dataValidation sqref="C2" type="list" showDropDown="0"><formula1>&quot;Yes,No&quot;<\/formula1><\/dataValidation>/,
+  );
+
+  sheet.removeAutoFilter();
+  sheet.removeDataValidation("A2");
+
+  sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.equal(sheet.getAutoFilter(), null);
+  assert.deepEqual(sheet.getDataValidations(), [
+    {
+      range: "C2",
+      type: "list",
+      operator: null,
+      allowBlank: null,
+      showInputMessage: null,
+      showErrorMessage: null,
+      showDropDown: false,
+      errorStyle: null,
+      errorTitle: null,
+      error: null,
+      promptTitle: null,
+      prompt: null,
+      imeMode: null,
+      formula1: "\"Yes,No\"",
+      formula2: null,
+    },
+  ]);
+  assert.doesNotMatch(sheetXml, /<autoFilter\b/);
+  assert.match(
+    sheetXml,
+    /<dataValidations count="1"><dataValidation sqref="C2" type="list" showDropDown="0"><formula1>&quot;Yes,No&quot;<\/formula1><\/dataValidation><\/dataValidations>/,
+  );
+});
+
 test("workbook defined name APIs read, write, and delete global and local names", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = replaceEntryText(

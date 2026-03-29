@@ -38,7 +38,6 @@ import {
   decodeXmlText,
   escapeRegex,
   escapeXmlText,
-  extractTagText,
   getXmlAttr,
   parseAttributes,
   serializeAttributes,
@@ -3438,12 +3437,12 @@ function removeTablePartsFromSheetXml(sheetXml: string, relationshipIds: string[
 }
 
 function parseSheetAutoFilter(sheetXml: string): string | null {
-  const autoFilterMatch = sheetXml.match(/<autoFilter\b([^>]*?)\/>/);
-  if (!autoFilterMatch) {
+  const autoFilterTag = findFirstXmlTag(sheetXml, "autoFilter");
+  if (!autoFilterTag) {
     return null;
   }
 
-  const ref = getXmlAttr(autoFilterMatch[1], "ref");
+  const ref = getTagAttr(autoFilterTag, "ref");
   return ref ? normalizeRangeRef(ref) : null;
 }
 
@@ -3492,6 +3491,26 @@ function ensureXmlAttribute(attributes: Array<[string, string]>, name: string, v
   if (!attributes.some(([candidateName]) => candidateName === name)) {
     attributes.push([name, value]);
   }
+}
+
+function buildCountedXmlContainer(
+  tagName: string,
+  attributesSource: string,
+  countAttributeName: string,
+  childXml: string[],
+): string {
+  const attributes = parseAttributes(attributesSource);
+  const nextAttributes = [...attributes];
+  const countIndex = nextAttributes.findIndex(([name]) => name === countAttributeName);
+
+  if (countIndex === -1) {
+    nextAttributes.push([countAttributeName, String(childXml.length)]);
+  } else {
+    nextAttributes[countIndex] = [countAttributeName, String(childXml.length)];
+  }
+
+  const serializedAttributes = serializeAttributes(nextAttributes);
+  return `<${tagName}${serializedAttributes ? ` ${serializedAttributes}` : ""}>${childXml.join("")}</${tagName}>`;
 }
 
 function parseSheetFreezePane(sheetXml: string): FreezePane | null {
@@ -3682,14 +3701,10 @@ function upsertSheetSelectionInSheetXml(
 function upsertAutoFilterInSheetXml(sheetXml: string, range: string): string {
   const normalizedRange = normalizeRangeRef(range);
   const autoFilterXml = `<autoFilter ref="${normalizedRange}"/>`;
-  const autoFilterMatch = sheetXml.match(/<autoFilter\b[^>]*\/>/);
+  const autoFilterTag = findFirstXmlTag(sheetXml, "autoFilter");
 
-  if (autoFilterMatch && autoFilterMatch.index !== undefined) {
-    return (
-      sheetXml.slice(0, autoFilterMatch.index) +
-      autoFilterXml +
-      sheetXml.slice(autoFilterMatch.index + autoFilterMatch[0].length)
-    );
+  if (autoFilterTag) {
+    return replaceXmlTagSource(sheetXml, autoFilterTag, autoFilterXml);
   }
 
   const insertionIndex = findWorksheetChildInsertionIndex(sheetXml, AUTO_FILTER_FOLLOWING_TAGS);
@@ -3697,45 +3712,55 @@ function upsertAutoFilterInSheetXml(sheetXml: string, range: string): string {
 }
 
 function removeAutoFilterFromSheetXml(sheetXml: string): string {
-  return sheetXml
-    .replace(/<autoFilter\b[^>]*\/>/, "")
-    .replace(/<sortState\b[^>]*\/>/, "");
+  let nextSheetXml = sheetXml;
+
+  const autoFilterTag = findFirstXmlTag(nextSheetXml, "autoFilter");
+  if (autoFilterTag) {
+    nextSheetXml = replaceXmlTagSource(nextSheetXml, autoFilterTag, "");
+  }
+
+  const sortStateTag = findFirstXmlTag(nextSheetXml, "sortState");
+  if (sortStateTag) {
+    nextSheetXml = replaceXmlTagSource(nextSheetXml, sortStateTag, "");
+  }
+
+  return nextSheetXml;
 }
 
 function parseSheetDataValidations(sheetXml: string): DataValidation[] {
-  const dataValidationsMatch = sheetXml.match(/<dataValidations\b[^>]*>([\s\S]*?)<\/dataValidations>/);
-  if (!dataValidationsMatch) {
+  const dataValidationsTag = findFirstXmlTag(sheetXml, "dataValidations");
+  if (!dataValidationsTag || dataValidationsTag.innerXml === null) {
     return [];
   }
 
-  return parseDataValidationEntries(dataValidationsMatch[1])
-    .map(({ attributesSource, innerXml }) => {
-      const sqref = getXmlAttr(attributesSource, "sqref");
+  return parseDataValidationEntries(dataValidationsTag.innerXml)
+    .map((validationTag) => {
+      const sqref = getTagAttr(validationTag, "sqref");
       if (!sqref) {
         return null;
       }
 
-      const errorTitle = getXmlAttr(attributesSource, "errorTitle");
-      const error = getXmlAttr(attributesSource, "error");
-      const promptTitle = getXmlAttr(attributesSource, "promptTitle");
-      const prompt = getXmlAttr(attributesSource, "prompt");
-      const formula1 = extractTagText(innerXml, "formula1");
-      const formula2 = extractTagText(innerXml, "formula2");
+      const errorTitle = getTagAttr(validationTag, "errorTitle");
+      const error = getTagAttr(validationTag, "error");
+      const promptTitle = getTagAttr(validationTag, "promptTitle");
+      const prompt = getTagAttr(validationTag, "prompt");
+      const formula1 = findFirstXmlTag(validationTag.innerXml ?? "", "formula1")?.innerXml;
+      const formula2 = findFirstXmlTag(validationTag.innerXml ?? "", "formula2")?.innerXml;
 
       return {
         range: normalizeSqref(sqref),
-        type: getXmlAttr(attributesSource, "type") ?? null,
-        operator: getXmlAttr(attributesSource, "operator") ?? null,
-        allowBlank: parseOptionalXmlBoolean(getXmlAttr(attributesSource, "allowBlank")),
-        showInputMessage: parseOptionalXmlBoolean(getXmlAttr(attributesSource, "showInputMessage")),
-        showErrorMessage: parseOptionalXmlBoolean(getXmlAttr(attributesSource, "showErrorMessage")),
-        showDropDown: parseOptionalXmlBoolean(getXmlAttr(attributesSource, "showDropDown")),
-        errorStyle: getXmlAttr(attributesSource, "errorStyle") ?? null,
+        type: getTagAttr(validationTag, "type") ?? null,
+        operator: getTagAttr(validationTag, "operator") ?? null,
+        allowBlank: parseOptionalXmlBoolean(getTagAttr(validationTag, "allowBlank")),
+        showInputMessage: parseOptionalXmlBoolean(getTagAttr(validationTag, "showInputMessage")),
+        showErrorMessage: parseOptionalXmlBoolean(getTagAttr(validationTag, "showErrorMessage")),
+        showDropDown: parseOptionalXmlBoolean(getTagAttr(validationTag, "showDropDown")),
+        errorStyle: getTagAttr(validationTag, "errorStyle") ?? null,
         errorTitle: errorTitle ? decodeXmlText(errorTitle) : null,
         error: error ? decodeXmlText(error) : null,
         promptTitle: promptTitle ? decodeXmlText(promptTitle) : null,
         prompt: prompt ? decodeXmlText(prompt) : null,
-        imeMode: getXmlAttr(attributesSource, "imeMode") ?? null,
+        imeMode: getTagAttr(validationTag, "imeMode") ?? null,
         formula1: formula1 ? decodeXmlText(formula1) : null,
         formula2: formula2 ? decodeXmlText(formula2) : null,
       };
@@ -3743,19 +3768,8 @@ function parseSheetDataValidations(sheetXml: string): DataValidation[] {
     .filter((validation): validation is DataValidation => validation !== null);
 }
 
-function parseDataValidationEntries(innerXml: string): Array<{
-  attributesSource: string;
-  innerXml: string;
-  xml: string;
-}> {
-  return Array.from(
-    innerXml.matchAll(/<dataValidation\b([^>]*?)(?:\/>|>([\s\S]*?)<\/dataValidation>)/g),
-    (match) => ({
-      attributesSource: match[1],
-      innerXml: match[2] ?? "",
-      xml: match[0],
-    }),
-  );
+function parseDataValidationEntries(innerXml: string): XmlTag[] {
+  return findXmlTags(innerXml, "dataValidation");
 }
 
 function buildDataValidationXml(range: string, options: SetDataValidationOptions): string {
@@ -3788,27 +3802,25 @@ function buildDataValidationXml(range: string, options: SetDataValidationOptions
 
 function upsertDataValidationInSheetXml(sheetXml: string, dataValidationXml: string, range: string): string {
   const normalizedRange = normalizeSqref(range);
-  const dataValidationsMatch = sheetXml.match(/<dataValidations\b[^>]*>([\s\S]*?)<\/dataValidations>/);
-  const dataValidations = (dataValidationsMatch
-    ? parseDataValidationEntries(dataValidationsMatch[1]).map((validation) => ({
-        range: normalizeSqref(getXmlAttr(validation.attributesSource, "sqref") ?? ""),
-        xml: validation.xml,
+  const dataValidationsTag = findFirstXmlTag(sheetXml, "dataValidations");
+  const dataValidations = ((dataValidationsTag?.innerXml ?? "")
+    ? parseDataValidationEntries(dataValidationsTag?.innerXml ?? "").map((validationTag) => ({
+        range: normalizeSqref(getTagAttr(validationTag, "sqref") ?? ""),
+        xml: validationTag.source,
       }))
     : []
   ).filter((validation) => validation.range !== normalizedRange);
 
   dataValidations.push({ range: normalizedRange, xml: dataValidationXml });
-  const nextDataValidationsXml =
-    `<dataValidations count="${dataValidations.length}">` +
-    dataValidations.map((validation) => validation.xml).join("") +
-    `</dataValidations>`;
+  const nextDataValidationsXml = buildCountedXmlContainer(
+    "dataValidations",
+    dataValidationsTag?.attributesSource ?? "",
+    "count",
+    dataValidations.map((validation) => validation.xml),
+  );
 
-  if (dataValidationsMatch && dataValidationsMatch.index !== undefined) {
-    return (
-      sheetXml.slice(0, dataValidationsMatch.index) +
-      nextDataValidationsXml +
-      sheetXml.slice(dataValidationsMatch.index + dataValidationsMatch[0].length)
-    );
+  if (dataValidationsTag) {
+    return replaceXmlTagSource(sheetXml, dataValidationsTag, nextDataValidationsXml);
   }
 
   const insertionIndex = findWorksheetChildInsertionIndex(sheetXml, DATA_VALIDATIONS_FOLLOWING_TAGS);
@@ -3817,27 +3829,26 @@ function upsertDataValidationInSheetXml(sheetXml: string, dataValidationXml: str
 
 function removeDataValidationFromSheetXml(sheetXml: string, range: string): string {
   const normalizedRange = normalizeSqref(range);
-  const dataValidationsMatch = sheetXml.match(/<dataValidations\b[^>]*>([\s\S]*?)<\/dataValidations>/);
-  if (!dataValidationsMatch || dataValidationsMatch.index === undefined) {
+  const dataValidationsTag = findFirstXmlTag(sheetXml, "dataValidations");
+  if (!dataValidationsTag || dataValidationsTag.innerXml === null) {
     return sheetXml;
   }
 
-  const keptDataValidations = parseDataValidationEntries(dataValidationsMatch[1]).filter(
-    (validation) => normalizeSqref(getXmlAttr(validation.attributesSource, "sqref") ?? "") !== normalizedRange,
+  const keptDataValidations = parseDataValidationEntries(dataValidationsTag.innerXml).filter(
+    (validationTag) => normalizeSqref(getTagAttr(validationTag, "sqref") ?? "") !== normalizedRange,
   );
 
   const nextDataValidationsXml =
     keptDataValidations.length === 0
       ? ""
-      : `<dataValidations count="${keptDataValidations.length}">${keptDataValidations
-          .map((validation) => validation.xml)
-          .join("")}</dataValidations>`;
+      : buildCountedXmlContainer(
+          "dataValidations",
+          dataValidationsTag.attributesSource,
+          "count",
+          keptDataValidations.map((validationTag) => validationTag.source),
+        );
 
-  return (
-    sheetXml.slice(0, dataValidationsMatch.index) +
-    nextDataValidationsXml +
-    sheetXml.slice(dataValidationsMatch.index + dataValidationsMatch[0].length)
-  );
+  return replaceXmlTagSource(sheetXml, dataValidationsTag, nextDataValidationsXml);
 }
 
 function parseSheetHyperlinks(

@@ -4130,20 +4130,23 @@ function upsertRelationship(
   targetMode?: string,
 ): string {
   const nextRelationshipXml = buildRelationshipXml(relationshipId, type, target, targetMode);
-  const relationshipRegex = new RegExp(
-    `<Relationship\\b[^>]*\\bId\\s*=\\s*["']${escapeRegex(relationshipId)}["'][^>]*/>`,
-  );
+  for (const relationshipTag of findXmlTags(relationshipsXml, "Relationship")) {
+    if (getTagAttr(relationshipTag, "Id") === relationshipId) {
+      return replaceXmlTagSource(relationshipsXml, relationshipTag, nextRelationshipXml);
+    }
+  }
 
-  return relationshipRegex.test(relationshipsXml)
-    ? relationshipsXml.replace(relationshipRegex, nextRelationshipXml)
-    : appendRelationship(relationshipsXml, relationshipId, type, target, targetMode);
+  return appendRelationship(relationshipsXml, relationshipId, type, target, targetMode);
 }
 
 function removeRelationshipById(relationshipsXml: string, relationshipId: string): string {
-  return relationshipsXml.replace(
-    new RegExp(`<Relationship\\b[^>]*\\bId\\s*=\\s*["']${escapeRegex(relationshipId)}["'][^>]*/>`),
-    "",
-  );
+  for (const relationshipTag of findXmlTags(relationshipsXml, "Relationship")) {
+    if (getTagAttr(relationshipTag, "Id") === relationshipId) {
+      return replaceXmlTagSource(relationshipsXml, relationshipTag, "");
+    }
+  }
+
+  return relationshipsXml;
 }
 
 function buildRelationshipXml(
@@ -4358,10 +4361,13 @@ function addContentTypeOverride(contentTypesXml: string, partPath: string, conte
 }
 
 function removeContentTypeOverride(contentTypesXml: string, partPath: string): string {
-  return contentTypesXml.replace(
-    new RegExp(`<Override\\b[^>]*\\bPartName\\s*=\\s*["']/${escapeRegex(partPath)}["'][^>]*/>`),
-    "",
-  );
+  for (const overrideTag of findXmlTags(contentTypesXml, "Override")) {
+    if (getTagAttr(overrideTag, "PartName") === `/${partPath}`) {
+      return replaceXmlTagSource(contentTypesXml, overrideTag, "");
+    }
+  }
+
+  return contentTypesXml;
 }
 
 function assertFreezeSplit(columnCount: number, rowCount: number): void {

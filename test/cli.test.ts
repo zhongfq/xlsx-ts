@@ -1,11 +1,32 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { runCli } from "../src/cli.ts";
 import { Workbook } from "../src/index.ts";
+
+test("symlinked CLI entry prints help output", async () => {
+  const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-cli-test-"));
+
+  try {
+    const symlinkPath = join(tempRoot, "xlsx-ts");
+    await symlink(resolve("src/cli.ts"), symlinkPath);
+
+    const result = spawnSync(process.execPath, ["--import", "tsx", symlinkPath, "--help"], {
+      encoding: "utf8",
+    });
+
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /Usage: xlsx-ts \[options\] \[command\]/);
+    assert.match(result.stdout, /display help for command/);
+    assert.equal(result.stderr, "");
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
 
 test("inspect reports workbook structure as JSON", async () => {
   const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-cli-test-"));

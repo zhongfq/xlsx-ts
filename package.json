@@ -1,6 +1,6 @@
 {
   "name": "@codetypess/xlsx-ts",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A lossless-first XLSX reader/writer prototype that preserves styles and untouched package parts.",
   "type": "module",
   "license": "MIT",
@@ -13,12 +13,15 @@
   "bugs": {
     "url": "https://github.com/codetypess/xlsx-ts/issues"
   },
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
   "bin": {
     "xlsx-ts": "./dist/src/cli.js"
   },
   "exports": {
     ".": {
       "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js",
       "default": "./dist/src/index.js"
     }
   },
@@ -42,6 +45,7 @@
     "validate:task": "npm run validate:roundtrip -- res/task.xlsx"
   },
   "devDependencies": {
+    "@types/node": "^25.5.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "xlsx": "^0.18.5"

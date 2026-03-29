@@ -9,6 +9,9 @@
     "skipLibCheck": true,
     "declaration": true,
     "verbatimModuleSyntax": true,
+    "types": [
+      "node"
+    ],
     "lib": [
       "ES2022",
       "DOM"

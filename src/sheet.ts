@@ -4521,39 +4521,29 @@ function compareCellAddresses(left: string, right: string): number {
 
 function updateDimensionRef(sheetIndex: SheetIndex): string {
   const usedRange = formatUsedRangeBounds(sheetIndex.usedBounds);
-  const dimensionMatch = sheetIndex.xml.match(/<dimension\b([^>]*?)\/>/);
+  const dimensionTag = findFirstXmlTag(sheetIndex.xml, "dimension");
 
   if (!usedRange) {
-    if (!dimensionMatch || dimensionMatch.index === undefined) {
+    if (!dimensionTag) {
       return sheetIndex.xml;
     }
 
-    return (
-      sheetIndex.xml.slice(0, dimensionMatch.index) +
-      sheetIndex.xml.slice(dimensionMatch.index + dimensionMatch[0].length)
-    );
+    return replaceXmlTagSource(sheetIndex.xml, dimensionTag, "");
   }
 
   const dimensionXml = `<dimension ref="${usedRange}"/>`;
 
-  if (dimensionMatch && dimensionMatch.index !== undefined) {
-    return (
-      sheetIndex.xml.slice(0, dimensionMatch.index) +
-      dimensionXml +
-      sheetIndex.xml.slice(dimensionMatch.index + dimensionMatch[0].length)
-    );
+  if (dimensionTag) {
+    return replaceXmlTagSource(sheetIndex.xml, dimensionTag, dimensionXml);
   }
 
-  const worksheetOpenTagMatch = sheetIndex.xml.match(/<worksheet\b[^>]*>/);
-  if (!worksheetOpenTagMatch || worksheetOpenTagMatch.index === undefined) {
+  const worksheetTag = findFirstXmlTag(sheetIndex.xml, "worksheet");
+  if (!worksheetTag) {
     throw new XlsxError("Worksheet is missing opening tag");
   }
 
-  return (
-    sheetIndex.xml.slice(0, worksheetOpenTagMatch.index + worksheetOpenTagMatch[0].length) +
-    dimensionXml +
-    sheetIndex.xml.slice(worksheetOpenTagMatch.index + worksheetOpenTagMatch[0].length)
-  );
+  const worksheetInnerStart = getXmlTagInnerStart(worksheetTag);
+  return sheetIndex.xml.slice(0, worksheetInnerStart) + dimensionXml + sheetIndex.xml.slice(worksheetInnerStart);
 }
 
 function formatUsedRangeBounds(bounds: UsedRangeBounds | null): string | null {

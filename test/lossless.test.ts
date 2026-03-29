@@ -1674,6 +1674,99 @@ test("style definition APIs read and clone workbook cellXfs", async () => {
   assert.match(sheetXml, /<c r="B2" s="3"\/>/);
 });
 
+test("style writers tolerate single-quoted styles containers", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = convertEntriesToSingleQuotedAttributes(await loadFixtureEntries(fixtureDir), ["xl/styles.xml"]);
+  const workbook = Workbook.fromEntries(entries);
+
+  workbook.updateFont(0, { name: "Arial", size: 12 });
+  const clonedFontId = workbook.cloneFont(1, {
+    italic: true,
+    color: {
+      rgb: "FFFF0000",
+    },
+  });
+
+  workbook.updateFill(1, {
+    patternType: "solid",
+    fgColor: {
+      rgb: "FF00FF00",
+    },
+  });
+  const clonedFillId = workbook.cloneFill(0, {
+    patternType: "solid",
+    fgColor: {
+      rgb: "FFFF0000",
+    },
+  });
+
+  workbook.updateBorder(0, {
+    top: {
+      style: "thin",
+      color: {
+        rgb: "FFFF0000",
+      },
+    },
+  });
+  const clonedBorderId = workbook.cloneBorder(0, {
+    bottom: {
+      style: "double",
+      color: {
+        rgb: "FF00FF00",
+      },
+    },
+  });
+
+  const numFmtId = workbook.cloneNumberFormat(0, "0.00");
+  workbook.updateNumberFormat(numFmtId, "0.000");
+
+  workbook.updateStyle(1, {
+    applyAlignment: true,
+    alignment: {
+      horizontal: "center",
+    },
+  });
+  const clonedStyleId = workbook.cloneStyle(1, {
+    fontId: clonedFontId,
+    fillId: clonedFillId,
+    borderId: clonedBorderId,
+    numFmtId,
+    applyFont: true,
+    applyFill: true,
+    applyBorder: true,
+    applyNumberFormat: true,
+  });
+
+  assert.equal(workbook.getFont(0)?.name, "Arial");
+  assert.equal(workbook.getFont(0)?.size, 12);
+  assert.equal(workbook.getFont(clonedFontId)?.italic, true);
+  assert.deepEqual(workbook.getFont(clonedFontId)?.color, { rgb: "FFFF0000" });
+  assert.equal(workbook.getFill(1)?.patternType, "solid");
+  assert.deepEqual(workbook.getFill(1)?.fgColor, { rgb: "FF00FF00" });
+  assert.deepEqual(workbook.getFill(clonedFillId)?.fgColor, { rgb: "FFFF0000" });
+  assert.equal(workbook.getBorder(0)?.top?.style, "thin");
+  assert.deepEqual(workbook.getBorder(0)?.top?.color, { rgb: "FFFF0000" });
+  assert.equal(workbook.getBorder(clonedBorderId)?.bottom?.style, "double");
+  assert.deepEqual(workbook.getBorder(clonedBorderId)?.bottom?.color, { rgb: "FF00FF00" });
+  assert.deepEqual(workbook.getNumberFormat(numFmtId), {
+    builtin: false,
+    code: "0.000",
+    numFmtId,
+  });
+  assert.equal(workbook.getStyle(1)?.alignment?.horizontal, "center");
+  assert.equal(workbook.getStyle(clonedStyleId)?.fontId, clonedFontId);
+  assert.equal(workbook.getStyle(clonedStyleId)?.fillId, clonedFillId);
+  assert.equal(workbook.getStyle(clonedStyleId)?.borderId, clonedBorderId);
+  assert.equal(workbook.getStyle(clonedStyleId)?.numFmtId, numFmtId);
+
+  const stylesXml = entryText(workbook.toEntries(), "xl/styles.xml");
+  assert.match(stylesXml, /<fonts count="3">/);
+  assert.match(stylesXml, /<fills count="3">/);
+  assert.match(stylesXml, /<borders count="2">/);
+  assert.match(stylesXml, /<numFmts count="1">/);
+  assert.match(stylesXml, /<cellXfs count="3">/);
+});
+
 test("workbook updateStyle patches existing cellXfs in place", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = await loadFixtureEntries(fixtureDir);

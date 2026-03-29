@@ -967,49 +967,32 @@ export class Workbook {
 }
 
 function parseStylesXml(path: string, xml: string): StylesCache {
-  const bordersMatch = xml.match(/<borders\b([^>]*)>([\s\S]*?)<\/borders>/);
-  const fontsMatch = xml.match(/<fonts\b([^>]*)>([\s\S]*?)<\/fonts>/);
-  const fillsMatch = xml.match(/<fills\b([^>]*)>([\s\S]*?)<\/fills>/);
-  const cellXfsMatch = xml.match(/<cellXfs\b([^>]*)>([\s\S]*?)<\/cellXfs>/);
-  if (!bordersMatch) {
-    throw new XlsxError("styles.xml is missing <borders>");
-  }
-  if (!fontsMatch) {
-    throw new XlsxError("styles.xml is missing <fonts>");
-  }
-  if (!fillsMatch) {
-    throw new XlsxError("styles.xml is missing <fills>");
-  }
-  if (!cellXfsMatch) {
-    throw new XlsxError("styles.xml is missing <cellXfs>");
-  }
+  const bordersTag = getRequiredXmlContainerTag(xml, "borders", "styles.xml");
+  const fontsTag = getRequiredXmlContainerTag(xml, "fonts", "styles.xml");
+  const fillsTag = getRequiredXmlContainerTag(xml, "fills", "styles.xml");
+  const cellXfsTag = getRequiredXmlContainerTag(xml, "cellXfs", "styles.xml");
 
   return {
     path,
     xml,
-    borders: Array.from(
-      bordersMatch[2].matchAll(/<border\b[^>]*?>([\s\S]*?)<\/border>|<border\b[^>]*?\/>/g),
-      (match) => parseBorder(match[0]),
-    ),
-    fills: Array.from(fillsMatch[2].matchAll(/<fill\b[^>]*?>([\s\S]*?)<\/fill>|<fill\b[^>]*?\/>/g), (match) =>
-      parseFill(match[0]),
-    ),
-    fonts: Array.from(fontsMatch[2].matchAll(/<font\b[^>]*?>([\s\S]*?)<\/font>|<font\b[^>]*?\/>/g), (match) =>
-      parseFont(match[0]),
-    ),
+    borders: findXmlTags(bordersTag.innerXml, "border").map((tag) => parseBorder(tag.source)),
+    fills: findXmlTags(fillsTag.innerXml, "fill").map((tag) => parseFill(tag.source)),
+    fonts: findXmlTags(fontsTag.innerXml, "font").map((tag) => parseFont(tag.source)),
     numberFormats: parseNumberFormats(xml),
-    cellXfs: Array.from(cellXfsMatch[2].matchAll(/<xf\b([^>]*?)(?:\/>|>([\s\S]*?)<\/xf>)/g), (match) =>
-      parseCellStyle(match[1], match[2] ?? ""),
-    ),
+    cellXfs: findXmlTags(cellXfsTag.innerXml, "xf").map((tag) => parseCellStyle(tag.attributesSource, tag.innerXml ?? "")),
   };
 }
 
 function parseNumberFormats(stylesXml: string): Map<number, string> {
   const numberFormats = new Map<number, string>();
+  const numberFormatsTag = findFirstXmlTag(stylesXml, "numFmts");
+  if (!numberFormatsTag || numberFormatsTag.innerXml === null) {
+    return numberFormats;
+  }
 
-  for (const match of stylesXml.matchAll(/<numFmt\b([^>]*)\/>/g)) {
-    const numFmtIdText = getXmlAttr(match[1], "numFmtId");
-    const formatCode = getXmlAttr(match[1], "formatCode");
+  for (const numFmtTag of findXmlTags(numberFormatsTag.innerXml, "numFmt")) {
+    const numFmtIdText = getTagAttr(numFmtTag, "numFmtId");
+    const formatCode = getTagAttr(numFmtTag, "formatCode");
     if (numFmtIdText === undefined || formatCode === undefined) {
       continue;
     }
@@ -1220,251 +1203,147 @@ function parseAlignmentDefinition(attributes: Array<[string, string]>): CellStyl
   return alignment;
 }
 
-function appendFontToStylesXml(stylesXml: string, fontXml: string): string {
-  const fontsMatch = stylesXml.match(/<fonts\b([^>]*)>([\s\S]*?)<\/fonts>/);
-  if (!fontsMatch || fontsMatch.index === undefined) {
-    throw new XlsxError("styles.xml is missing <fonts>");
+function getRequiredXmlContainerTag(xml: string, tagName: string, fileLabel: string): XmlTag & { innerXml: string } {
+  const tag = findFirstXmlTag(xml, tagName);
+  if (!tag || tag.innerXml === null) {
+    throw new XlsxError(`${fileLabel} is missing <${tagName}>`);
   }
 
-  const attributes = parseAttributes(fontsMatch[1]);
-  const nextCount = Array.from(fontsMatch[2].matchAll(/<font\b/g)).length + 1;
+  return tag as XmlTag & { innerXml: string };
+}
+
+function buildStylesContainerXml(tagName: string, attributesSource: string, innerXml: string): string {
+  const attributes = parseAttributes(attributesSource);
+  const nextCount = findXmlTags(innerXml, getStylesContainerChildTagName(tagName)).length;
   const nextAttributes = upsertAttribute(attributes, "count", String(nextCount));
   const serializedAttributes = serializeAttributes(nextAttributes);
-  const trailingWhitespace = fontsMatch[2].match(/\s*$/)?.[0] ?? "";
-  const innerXmlWithoutTrailing = fontsMatch[2].slice(0, fontsMatch[2].length - trailingWhitespace.length);
+  return `<${tagName}${serializedAttributes ? ` ${serializedAttributes}` : ""}>${innerXml}</${tagName}>`;
+}
+
+function getStylesContainerChildTagName(tagName: string): string {
+  if (tagName === "borders") {
+    return "border";
+  }
+  if (tagName === "fonts") {
+    return "font";
+  }
+  if (tagName === "fills") {
+    return "fill";
+  }
+  if (tagName === "cellXfs") {
+    return "xf";
+  }
+  if (tagName === "numFmts") {
+    return "numFmt";
+  }
+
+  throw new XlsxError(`Unsupported styles container: <${tagName}>`);
+}
+
+function appendXmlToStylesContainer(
+  stylesXml: string,
+  containerTagName: string,
+  childXml: string,
+): string {
+  const containerTag = getRequiredXmlContainerTag(stylesXml, containerTagName, "styles.xml");
+  const innerXml = containerTag.innerXml;
+  const trailingWhitespace = innerXml.match(/\s*$/)?.[0] ?? "";
+  const innerXmlWithoutTrailing = innerXml.slice(0, innerXml.length - trailingWhitespace.length);
   const closingIndentMatch = trailingWhitespace.match(/\n([ \t]*)$/);
   const entryPrefix = closingIndentMatch ? `\n${closingIndentMatch[1]}  ` : "";
-  const nextInnerXml = `${innerXmlWithoutTrailing}${entryPrefix}${fontXml}${trailingWhitespace}`;
-  const nextFontsXml = `<fonts${serializedAttributes ? ` ${serializedAttributes}` : ""}>${nextInnerXml}</fonts>`;
+  const nextInnerXml = `${innerXmlWithoutTrailing}${entryPrefix}${childXml}${trailingWhitespace}`;
+  const nextContainerXml = buildStylesContainerXml(containerTagName, containerTag.attributesSource, nextInnerXml);
 
-  return stylesXml.slice(0, fontsMatch.index) + nextFontsXml + stylesXml.slice(fontsMatch.index + fontsMatch[0].length);
+  return replaceXmlTagSource(stylesXml, containerTag, nextContainerXml);
+}
+
+function replaceIndexedXmlInStylesContainer(
+  stylesXml: string,
+  containerTagName: string,
+  targetIndex: number,
+  childXml: string,
+  missingMessage: string,
+): string {
+  const containerTag = getRequiredXmlContainerTag(stylesXml, containerTagName, "styles.xml");
+  const childTags = findXmlTags(containerTag.innerXml, getStylesContainerChildTagName(containerTagName));
+  const childTag = childTags[targetIndex];
+  if (!childTag) {
+    throw new XlsxError(missingMessage);
+  }
+
+  const nextInnerXml =
+    containerTag.innerXml.slice(0, childTag.start) + childXml + containerTag.innerXml.slice(childTag.end);
+  const nextContainerXml = buildStylesContainerXml(containerTagName, containerTag.attributesSource, nextInnerXml);
+
+  return replaceXmlTagSource(stylesXml, containerTag, nextContainerXml);
+}
+
+function appendFontToStylesXml(stylesXml: string, fontXml: string): string {
+  return appendXmlToStylesContainer(stylesXml, "fonts", fontXml);
 }
 
 function appendFillToStylesXml(stylesXml: string, fillXml: string): string {
-  const fillsMatch = stylesXml.match(/<fills\b([^>]*)>([\s\S]*?)<\/fills>/);
-  if (!fillsMatch || fillsMatch.index === undefined) {
-    throw new XlsxError("styles.xml is missing <fills>");
-  }
-
-  const attributes = parseAttributes(fillsMatch[1]);
-  const nextCount = Array.from(fillsMatch[2].matchAll(/<fill\b/g)).length + 1;
-  const nextAttributes = upsertAttribute(attributes, "count", String(nextCount));
-  const serializedAttributes = serializeAttributes(nextAttributes);
-  const trailingWhitespace = fillsMatch[2].match(/\s*$/)?.[0] ?? "";
-  const innerXmlWithoutTrailing = fillsMatch[2].slice(0, fillsMatch[2].length - trailingWhitespace.length);
-  const closingIndentMatch = trailingWhitespace.match(/\n([ \t]*)$/);
-  const entryPrefix = closingIndentMatch ? `\n${closingIndentMatch[1]}  ` : "";
-  const nextInnerXml = `${innerXmlWithoutTrailing}${entryPrefix}${fillXml}${trailingWhitespace}`;
-  const nextFillsXml = `<fills${serializedAttributes ? ` ${serializedAttributes}` : ""}>${nextInnerXml}</fills>`;
-
-  return stylesXml.slice(0, fillsMatch.index) + nextFillsXml + stylesXml.slice(fillsMatch.index + fillsMatch[0].length);
+  return appendXmlToStylesContainer(stylesXml, "fills", fillXml);
 }
 
 function appendBorderToStylesXml(stylesXml: string, borderXml: string): string {
-  const bordersMatch = stylesXml.match(/<borders\b([^>]*)>([\s\S]*?)<\/borders>/);
-  if (!bordersMatch || bordersMatch.index === undefined) {
-    throw new XlsxError("styles.xml is missing <borders>");
-  }
-
-  const attributes = parseAttributes(bordersMatch[1]);
-  const nextCount = Array.from(bordersMatch[2].matchAll(/<border\b/g)).length + 1;
-  const nextAttributes = upsertAttribute(attributes, "count", String(nextCount));
-  const serializedAttributes = serializeAttributes(nextAttributes);
-  const trailingWhitespace = bordersMatch[2].match(/\s*$/)?.[0] ?? "";
-  const innerXmlWithoutTrailing = bordersMatch[2].slice(0, bordersMatch[2].length - trailingWhitespace.length);
-  const closingIndentMatch = trailingWhitespace.match(/\n([ \t]*)$/);
-  const entryPrefix = closingIndentMatch ? `\n${closingIndentMatch[1]}  ` : "";
-  const nextInnerXml = `${innerXmlWithoutTrailing}${entryPrefix}${borderXml}${trailingWhitespace}`;
-  const nextBordersXml = `<borders${serializedAttributes ? ` ${serializedAttributes}` : ""}>${nextInnerXml}</borders>`;
-
-  return (
-    stylesXml.slice(0, bordersMatch.index) +
-    nextBordersXml +
-    stylesXml.slice(bordersMatch.index + bordersMatch[0].length)
-  );
+  return appendXmlToStylesContainer(stylesXml, "borders", borderXml);
 }
 
 function replaceFontInStylesXml(stylesXml: string, fontId: number, fontXml: string): string {
-  const fontsMatch = stylesXml.match(/<fonts\b([^>]*)>([\s\S]*?)<\/fonts>/);
-  if (!fontsMatch || fontsMatch.index === undefined) {
-    throw new XlsxError("styles.xml is missing <fonts>");
-  }
-
-  const innerXml = fontsMatch[2];
-  let currentFontIndex = 0;
-
-  for (const match of innerXml.matchAll(/<font\b[^>]*?>([\s\S]*?)<\/font>|<font\b[^>]*?\/>/g)) {
-    if (currentFontIndex !== fontId) {
-      currentFontIndex += 1;
-      continue;
-    }
-
-    if (match.index === undefined) {
-      break;
-    }
-
-    const nextInnerXml = innerXml.slice(0, match.index) + fontXml + innerXml.slice(match.index + match[0].length);
-    const nextFontsXml = `<fonts${fontsMatch[1]}>${nextInnerXml}</fonts>`;
-    return stylesXml.slice(0, fontsMatch.index) + nextFontsXml + stylesXml.slice(fontsMatch.index + fontsMatch[0].length);
-  }
-
-  throw new XlsxError(`Font not found: ${fontId}`);
+  return replaceIndexedXmlInStylesContainer(stylesXml, "fonts", fontId, fontXml, `Font not found: ${fontId}`);
 }
 
 function replaceFillInStylesXml(stylesXml: string, fillId: number, fillXml: string): string {
-  const fillsMatch = stylesXml.match(/<fills\b([^>]*)>([\s\S]*?)<\/fills>/);
-  if (!fillsMatch || fillsMatch.index === undefined) {
-    throw new XlsxError("styles.xml is missing <fills>");
-  }
-
-  const innerXml = fillsMatch[2];
-  let currentFillIndex = 0;
-
-  for (const match of innerXml.matchAll(/<fill\b[^>]*?>([\s\S]*?)<\/fill>|<fill\b[^>]*?\/>/g)) {
-    if (currentFillIndex !== fillId) {
-      currentFillIndex += 1;
-      continue;
-    }
-
-    if (match.index === undefined) {
-      break;
-    }
-
-    const nextInnerXml = innerXml.slice(0, match.index) + fillXml + innerXml.slice(match.index + match[0].length);
-    const nextFillsXml = `<fills${fillsMatch[1]}>${nextInnerXml}</fills>`;
-    return stylesXml.slice(0, fillsMatch.index) + nextFillsXml + stylesXml.slice(fillsMatch.index + fillsMatch[0].length);
-  }
-
-  throw new XlsxError(`Fill not found: ${fillId}`);
+  return replaceIndexedXmlInStylesContainer(stylesXml, "fills", fillId, fillXml, `Fill not found: ${fillId}`);
 }
 
 function replaceBorderInStylesXml(stylesXml: string, borderId: number, borderXml: string): string {
-  const bordersMatch = stylesXml.match(/<borders\b([^>]*)>([\s\S]*?)<\/borders>/);
-  if (!bordersMatch || bordersMatch.index === undefined) {
-    throw new XlsxError("styles.xml is missing <borders>");
-  }
-
-  const innerXml = bordersMatch[2];
-  let currentBorderIndex = 0;
-
-  for (const match of innerXml.matchAll(/<border\b[^>]*?>([\s\S]*?)<\/border>|<border\b[^>]*?\/>/g)) {
-    if (currentBorderIndex !== borderId) {
-      currentBorderIndex += 1;
-      continue;
-    }
-
-    if (match.index === undefined) {
-      break;
-    }
-
-    const nextInnerXml = innerXml.slice(0, match.index) + borderXml + innerXml.slice(match.index + match[0].length);
-    const nextBordersXml = `<borders${bordersMatch[1]}>${nextInnerXml}</borders>`;
-    return (
-      stylesXml.slice(0, bordersMatch.index) +
-      nextBordersXml +
-      stylesXml.slice(bordersMatch.index + bordersMatch[0].length)
-    );
-  }
-
-  throw new XlsxError(`Border not found: ${borderId}`);
+  return replaceIndexedXmlInStylesContainer(
+    stylesXml,
+    "borders",
+    borderId,
+    borderXml,
+    `Border not found: ${borderId}`,
+  );
 }
 
 function upsertNumberFormatInStylesXml(stylesXml: string, numFmtId: number, formatCode: string): string {
   const numFmtXml = `<numFmt numFmtId="${numFmtId}" formatCode="${escapeXmlText(formatCode)}"/>`;
-  const numberFormatsMatch = stylesXml.match(/<numFmts\b([^>]*)>([\s\S]*?)<\/numFmts>/);
+  const numberFormatsTag = findFirstXmlTag(stylesXml, "numFmts");
 
-  if (!numberFormatsMatch || numberFormatsMatch.index === undefined) {
-    const fontsMatch = stylesXml.match(/<fonts\b/);
-    if (!fontsMatch || fontsMatch.index === undefined) {
+  if (!numberFormatsTag || numberFormatsTag.innerXml === null) {
+    const fontsTag = findFirstXmlTag(stylesXml, "fonts");
+    if (!fontsTag) {
       throw new XlsxError("styles.xml is missing <fonts>");
     }
 
     return (
-      stylesXml.slice(0, fontsMatch.index) +
+      stylesXml.slice(0, fontsTag.start) +
       `<numFmts count="1">${numFmtXml}</numFmts>` +
-      stylesXml.slice(fontsMatch.index)
+      stylesXml.slice(fontsTag.start)
     );
   }
 
-  const innerXml = numberFormatsMatch[2];
-  let found = false;
-  const nextInnerXml = innerXml.replace(/<numFmt\b([^>]*)\/>/g, (match, attributesSource) => {
-    const currentNumFmtId = getXmlAttr(attributesSource, "numFmtId");
-    if (currentNumFmtId === undefined || Number(currentNumFmtId) !== numFmtId) {
-      return match;
-    }
+  const numFmtTags = findXmlTags(numberFormatsTag.innerXml, "numFmt");
+  const matchingTag = numFmtTags.find((tag) => Number(getTagAttr(tag, "numFmtId")) === numFmtId);
+  if (matchingTag) {
+    const nextInnerXml =
+      numberFormatsTag.innerXml.slice(0, matchingTag.start) +
+      numFmtXml +
+      numberFormatsTag.innerXml.slice(matchingTag.end);
+    return replaceXmlTagSource(stylesXml, numberFormatsTag, buildStylesContainerXml("numFmts", numberFormatsTag.attributesSource, nextInnerXml));
+  }
 
-    found = true;
-    return numFmtXml;
-  });
-
-  const finalInnerXml = found ? nextInnerXml : `${nextInnerXml}${numFmtXml}`;
-  const nextCount = Array.from(finalInnerXml.matchAll(/<numFmt\b/g)).length;
-  const nextAttributes = upsertAttribute(parseAttributes(numberFormatsMatch[1]), "count", String(nextCount));
-  const serializedAttributes = serializeAttributes(nextAttributes);
-  const nextNumFmtsXml = `<numFmts${serializedAttributes ? ` ${serializedAttributes}` : ""}>${finalInnerXml}</numFmts>`;
-
-  return (
-    stylesXml.slice(0, numberFormatsMatch.index) +
-    nextNumFmtsXml +
-    stylesXml.slice(numberFormatsMatch.index + numberFormatsMatch[0].length)
-  );
+  return appendXmlToStylesContainer(stylesXml, "numFmts", numFmtXml);
 }
 
 function appendCellXfToStylesXml(stylesXml: string, xfXml: string): string {
-  const cellXfsMatch = stylesXml.match(/<cellXfs\b([^>]*)>([\s\S]*?)<\/cellXfs>/);
-  if (!cellXfsMatch || cellXfsMatch.index === undefined) {
-    throw new XlsxError("styles.xml is missing <cellXfs>");
-  }
-
-  const attributes = parseAttributes(cellXfsMatch[1]);
-  const nextCount = Array.from(cellXfsMatch[2].matchAll(/<xf\b/g)).length + 1;
-  const nextAttributes = upsertAttribute(attributes, "count", String(nextCount));
-  const serializedAttributes = serializeAttributes(nextAttributes);
-  const trailingWhitespace = cellXfsMatch[2].match(/\s*$/)?.[0] ?? "";
-  const innerXmlWithoutTrailing = cellXfsMatch[2].slice(0, cellXfsMatch[2].length - trailingWhitespace.length);
-  const closingIndentMatch = trailingWhitespace.match(/\n([ \t]*)$/);
-  const entryPrefix = closingIndentMatch ? `\n${closingIndentMatch[1]}  ` : "";
-  const nextInnerXml = `${innerXmlWithoutTrailing}${entryPrefix}${xfXml}${trailingWhitespace}`;
-  const nextCellXfsXml = `<cellXfs${serializedAttributes ? ` ${serializedAttributes}` : ""}>${nextInnerXml}</cellXfs>`;
-
-  return (
-    stylesXml.slice(0, cellXfsMatch.index) +
-    nextCellXfsXml +
-    stylesXml.slice(cellXfsMatch.index + cellXfsMatch[0].length)
-  );
+  return appendXmlToStylesContainer(stylesXml, "cellXfs", xfXml);
 }
 
 function replaceCellXfInStylesXml(stylesXml: string, styleId: number, xfXml: string): string {
-  const cellXfsMatch = stylesXml.match(/<cellXfs\b([^>]*)>([\s\S]*?)<\/cellXfs>/);
-  if (!cellXfsMatch || cellXfsMatch.index === undefined) {
-    throw new XlsxError("styles.xml is missing <cellXfs>");
-  }
-
-  const innerXml = cellXfsMatch[2];
-  let xfIndex = 0;
-
-  for (const match of innerXml.matchAll(/<xf\b([^>]*?)(?:\/>|>([\s\S]*?)<\/xf>)/g)) {
-    if (xfIndex !== styleId) {
-      xfIndex += 1;
-      continue;
-    }
-
-    if (match.index === undefined) {
-      break;
-    }
-
-    const nextInnerXml =
-      innerXml.slice(0, match.index) + xfXml + innerXml.slice(match.index + match[0].length);
-    const nextCellXfsXml = `<cellXfs${cellXfsMatch[1]}>${nextInnerXml}</cellXfs>`;
-    return (
-      stylesXml.slice(0, cellXfsMatch.index) +
-      nextCellXfsXml +
-      stylesXml.slice(cellXfsMatch.index + cellXfsMatch[0].length)
-    );
-  }
-
-  throw new XlsxError(`Style not found: ${styleId}`);
+  return replaceIndexedXmlInStylesContainer(stylesXml, "cellXfs", styleId, xfXml, `Style not found: ${styleId}`);
 }
 
 function buildPatchedCellXfXml(sourceStyle: ParsedCellStyle, patch: CellStylePatch): string {

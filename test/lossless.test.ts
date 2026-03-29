@@ -97,6 +97,32 @@ test("workbook parsing decodes XML entities inside attribute values", async () =
   assert.equal(workbook.getDefinedName("LocalValue", "Sales & Ops"), "$B$2");
 });
 
+test("workbook readers tolerate single-quoted workbookView and definedName tags", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/workbook.xml",
+    `<?xml version='1.0' encoding='UTF-8' standalone='yes'?>
+<workbook xmlns='http://schemas.openxmlformats.org/spreadsheetml/2006/main' xmlns:r='http://schemas.openxmlformats.org/officeDocument/2006/relationships'>
+  <bookViews><workbookView activeTab='0'/></bookViews>
+  <sheets>
+    <sheet name='Sheet1' sheetId='1' r:id='rId1' state='hidden'/>
+  </sheets>
+  <definedNames>
+    <definedName name='LocalValue' localSheetId='0'>$B$2</definedName>
+  </definedNames>
+</workbook>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+
+  assert.equal(workbook.getActiveSheet().name, "Sheet1");
+  assert.equal(workbook.getSheetVisibility("Sheet1"), "hidden");
+  assert.deepEqual(workbook.getDefinedNames(), [
+    { hidden: false, name: "LocalValue", scope: "Sheet1", value: "$B$2" },
+  ]);
+  assert.equal(workbook.getDefinedName("LocalValue", "Sheet1"), "$B$2");
+});
+
 test("sheet addTable and removeTable tolerate single-quoted relationship and content-type attributes", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   let entries = replaceEntryText(
@@ -191,6 +217,53 @@ test("workbook addSheet and deleteSheet tolerate single-quoted workbook metadata
   assert.doesNotMatch(entryText(reparsed.toEntries(), "xl/workbook.xml"), /Sheet2/);
   assert.doesNotMatch(entryText(reparsed.toEntries(), "xl/_rels/workbook.xml.rels"), /sheet2\.xml/);
   assert.doesNotMatch(entryText(reparsed.toEntries(), "[Content_Types].xml"), /worksheets\/sheet2\.xml/);
+});
+
+test("sheet metadata readers tolerate single-quoted selection, merge, and hyperlink tags", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const encoder = new TextEncoder();
+  const entries = [
+    ...replaceEntryText(
+      await loadFixtureEntries(fixtureDir),
+      "xl/worksheets/sheet1.xml",
+      `<?xml version='1.0' encoding='UTF-8' standalone='yes'?>
+<worksheet xmlns='http://schemas.openxmlformats.org/spreadsheetml/2006/main'>
+  <sheetViews>
+    <sheetView workbookViewId='0'>
+      <selection pane='bottomRight' activeCell='B2' sqref='B2:C3'/>
+    </sheetView>
+  </sheetViews>
+  <sheetData>
+    <row r='1'><c r='A1' t='inlineStr'><is><t>Hello</t></is></c></row>
+  </sheetData>
+  <mergeCells count='1'><mergeCell ref='D4:E5'/></mergeCells>
+  <hyperlinks>
+    <hyperlink ref='A1' r:id='rId1' tooltip='Open site'/>
+    <hyperlink ref='B2' location='#Sheet1!A1'/>
+  </hyperlinks>
+</worksheet>`,
+    ),
+    {
+      path: "xl/worksheets/_rels/sheet1.xml.rels",
+      data: encoder.encode(`<?xml version='1.0' encoding='UTF-8' standalone='yes'?>
+<Relationships xmlns='http://schemas.openxmlformats.org/package/2006/relationships'>
+  <Relationship Id='rId1' Type='http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink' Target='https://example.com' TargetMode='External'/>
+</Relationships>`),
+    },
+  ].sort((left, right) => left.path.localeCompare(right.path));
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  assert.deepEqual(sheet.getSelection(), {
+    activeCell: "B2",
+    pane: "bottomRight",
+    range: "B2:C3",
+  });
+  assert.deepEqual(sheet.getMergedRanges(), ["D4:E5"]);
+  assert.deepEqual(sheet.getHyperlinks(), [
+    { address: "A1", target: "https://example.com", tooltip: "Open site", type: "external" },
+    { address: "B2", target: "#Sheet1!A1", tooltip: null, type: "internal" },
+  ]);
 });
 
 test("sheet reads stay coherent after repeated writes", async () => {

@@ -33,6 +33,7 @@ import {
 } from "./sheet-index.js";
 import type { Workbook } from "./workbook.js";
 import { basenamePosix, dirnamePosix, resolvePosix } from "./utils/path.js";
+import { findFirstXmlTag, findXmlTags, getTagAttr } from "./utils/xml-read.js";
 import {
   decodeXmlText,
   escapeRegex,
@@ -1454,10 +1455,10 @@ export class Sheet {
   }
 
   private getTableReferences(): TableReference[] {
-    const sheetRelationshipIds = Array.from(
-      this.getSheetIndex().xml.matchAll(/<tablePart\b[^>]*\br:id\s*=\s*["']([^"']+)["'][^>]*\/>/g),
-      (match) => match[1],
-    );
+    const sheetRelationshipIds = findXmlTags(this.getSheetIndex().xml, "tablePart")
+      .filter((tag) => tag.selfClosing)
+      .map((tag) => getTagAttr(tag, "r:id"))
+      .filter((relationshipId): relationshipId is string => relationshipId !== undefined);
     if (sheetRelationshipIds.length === 0) {
       return [];
     }
@@ -1471,11 +1472,14 @@ export class Sheet {
     const baseDir = dirnamePosix(this.path);
     const tables: TableReference[] = [];
 
-    for (const match of relationshipsXml.matchAll(/<Relationship\b([^>]*?)\/>/g)) {
-      const attributesSource = match[1];
-      const relationshipId = getXmlAttr(attributesSource, "Id");
-      const type = getXmlAttr(attributesSource, "Type");
-      const target = getXmlAttr(attributesSource, "Target");
+    for (const relationshipTag of findXmlTags(relationshipsXml, "Relationship")) {
+      if (!relationshipTag.selfClosing) {
+        continue;
+      }
+
+      const relationshipId = getTagAttr(relationshipTag, "Id");
+      const type = getTagAttr(relationshipTag, "Type");
+      const target = getTagAttr(relationshipTag, "Target");
 
       if (
         !relationshipId ||
@@ -3291,15 +3295,16 @@ function formatSheetReference(sheetName: string): string {
 }
 
 function parseMergedRanges(sheetXml: string): string[] {
-  const mergeCellsMatch = sheetXml.match(/<mergeCells\b[^>]*>([\s\S]*?)<\/mergeCells>/);
-  if (!mergeCellsMatch) {
+  const mergeCellsTag = findFirstXmlTag(sheetXml, "mergeCells");
+  if (!mergeCellsTag?.innerXml) {
     return [];
   }
 
-  return Array.from(
-    mergeCellsMatch[1].matchAll(/<mergeCell\b[^>]*\bref\s*=\s*["']([^"']+)["'][^>]*\/>/g),
-    (match) => normalizeRangeRef(match[1]),
-  );
+  return findXmlTags(mergeCellsTag.innerXml, "mergeCell")
+    .filter((tag) => tag.selfClosing)
+    .map((tag) => getTagAttr(tag, "ref"))
+    .filter((ref): ref is string => ref !== undefined)
+    .map((ref) => normalizeRangeRef(ref));
 }
 
 function updateMergedRanges(sheetXml: string, ranges: string[]): string {
@@ -3554,10 +3559,12 @@ function removeFreezePaneFromSheetXml(sheetXml: string): string {
   }
 
   const activePane = normalizePaneName(getXmlAttr(paneMatch[1], "activePane"));
-  const selections = Array.from(innerXml.matchAll(/<selection\b([^>]*?)\/>/g), (match) => ({
-    xml: match[0],
-    attributes: parseAttributes(match[1]),
-  }));
+  const selections = findXmlTags(innerXml, "selection")
+    .filter((tag) => tag.selfClosing)
+    .map((tag) => ({
+      xml: tag.source,
+      attributes: parseAttributes(tag.attributesSource),
+    }));
   const preferredSelection =
     selections.find((selection) => selection.attributes.find(([name]) => name === "pane")?.[1] === activePane) ??
     selections.find((selection) => selection.attributes.some(([name]) => name === "activeCell" || name === "sqref")) ??
@@ -3806,12 +3813,11 @@ function parseSheetHyperlinks(
   sheetXml: string,
   relationshipTargets: Map<string, string>,
 ): Hyperlink[] {
-  return Array.from(sheetXml.matchAll(/<hyperlink\b([^>]*?)\/>/g), (match) => {
-    const attributesSource = match[1];
-    const address = getXmlAttr(attributesSource, "ref");
-    const relationshipId = getXmlAttr(attributesSource, "r:id");
-    const location = getXmlAttr(attributesSource, "location");
-    const tooltip = getXmlAttr(attributesSource, "tooltip") ?? null;
+  return findXmlTags(sheetXml, "hyperlink").map((tag) => {
+    const address = getTagAttr(tag, "ref");
+    const relationshipId = getTagAttr(tag, "r:id");
+    const location = getTagAttr(tag, "location");
+    const tooltip = getTagAttr(tag, "tooltip") ?? null;
 
     if (!address) {
       return null;
@@ -3847,11 +3853,14 @@ function parseSheetHyperlinks(
 function parseHyperlinkRelationshipTargets(relationshipsXml: string): Map<string, string> {
   const targets = new Map<string, string>();
 
-  for (const match of relationshipsXml.matchAll(/<Relationship\b([^>]*?)\/>/g)) {
-    const attributesSource = match[1];
-    const relationshipId = getXmlAttr(attributesSource, "Id");
-    const type = getXmlAttr(attributesSource, "Type");
-    const target = getXmlAttr(attributesSource, "Target");
+  for (const relationshipTag of findXmlTags(relationshipsXml, "Relationship")) {
+    if (!relationshipTag.selfClosing) {
+      continue;
+    }
+
+    const relationshipId = getTagAttr(relationshipTag, "Id");
+    const type = getTagAttr(relationshipTag, "Type");
+    const target = getTagAttr(relationshipTag, "Target");
 
     if (!relationshipId || !type || !target || type !== HYPERLINK_RELATIONSHIP_TYPE) {
       continue;
@@ -3866,14 +3875,13 @@ function parseHyperlinkRelationshipTargets(relationshipsXml: string): Map<string
 function getHyperlinkRelationshipId(sheetXml: string, address: string): string | null {
   const normalizedAddress = normalizeCellAddress(address);
 
-  for (const match of sheetXml.matchAll(/<hyperlink\b([^>]*?)\/>/g)) {
-    const attributesSource = match[1];
-    const ref = getXmlAttr(attributesSource, "ref");
+  for (const hyperlinkTag of findXmlTags(sheetXml, "hyperlink")) {
+    const ref = getTagAttr(hyperlinkTag, "ref");
     if (!ref || normalizeCellAddress(ref) !== normalizedAddress) {
       continue;
     }
 
-    return getXmlAttr(attributesSource, "r:id") ?? null;
+    return getTagAttr(hyperlinkTag, "r:id") ?? null;
   }
 
   return null;
@@ -3902,12 +3910,11 @@ function upsertHyperlinkInSheetXml(sheetXml: string, hyperlinkXml: string, addre
   const hyperlinksMatch = sheetXml.match(/<hyperlinks\b[^>]*>([\s\S]*?)<\/hyperlinks>/);
 
   const hyperlinks = (hyperlinksMatch
-    ? Array.from(hyperlinksMatch[1].matchAll(/<hyperlink\b([^>]*?)\/>/g), (match) => {
-        const attributesSource = match[1];
-        const ref = getXmlAttr(attributesSource, "ref");
+    ? findXmlTags(hyperlinksMatch[1], "hyperlink").map((tag) => {
+        const ref = getTagAttr(tag, "ref");
         return {
           address: ref ? normalizeCellAddress(ref) : "",
-          xml: match[0],
+          xml: tag.source,
         };
       })
     : []
@@ -3941,17 +3948,15 @@ function removeHyperlinkFromSheetXml(sheetXml: string, address: string): string 
     return sheetXml;
   }
 
-  const keptHyperlinks = Array.from(
-    hyperlinksMatch[1].matchAll(/<hyperlink\b([^>]*?)\/>/g),
-    (match) => {
-      const attributesSource = match[1];
-      const ref = getXmlAttr(attributesSource, "ref");
+  const keptHyperlinks = findXmlTags(hyperlinksMatch[1], "hyperlink")
+    .map((tag) => {
+      const ref = getTagAttr(tag, "ref");
       return {
         address: ref ? normalizeCellAddress(ref) : "",
-        xml: match[0],
+        xml: tag.source,
       };
-    },
-  ).filter((hyperlink) => hyperlink.address !== normalizedAddress);
+    })
+    .filter((hyperlink) => hyperlink.address !== normalizedAddress);
 
   const nextHyperlinksXml =
     keptHyperlinks.length === 0
@@ -4156,10 +4161,9 @@ function makeRelativeSheetRelationshipTarget(sheetPath: string, targetPath: stri
 function appendTablePart(sheetXml: string, relationshipId: string): string {
   const tablePartsMatch = sheetXml.match(/<tableParts\b[^>]*>([\s\S]*?)<\/tableParts>/);
   if (tablePartsMatch && tablePartsMatch.index !== undefined) {
-    const tableParts = Array.from(
-      tablePartsMatch[1].matchAll(/<tablePart\b([^>]*?)\/>/g),
-      (match) => `<tablePart${match[1] ? ` ${match[1].trim()}` : ""}/>`,
-    );
+    const tableParts = findXmlTags(tablePartsMatch[1], "tablePart")
+      .filter((tag) => tag.selfClosing)
+      .map((tag) => tag.source);
     tableParts.push(`<tablePart r:id="${relationshipId}"/>`);
     const nextTablePartsXml = `<tableParts count="${tableParts.length}">${tableParts.join("")}</tableParts>`;
     return (
@@ -4257,15 +4261,14 @@ function buildFreezePaneSelectionsXml(columnCount: number, rowCount: number): st
 }
 
 function parseSheetSelectionEntries(sheetXml: string): SheetSelection[] {
-  return Array.from(sheetXml.matchAll(/<selection\b([^>]*?)\/>/g), (match) => {
-    const attributesSource = match[1];
-    const activeCell = getXmlAttr(attributesSource, "activeCell");
-    const sqref = getXmlAttr(attributesSource, "sqref");
+  return findXmlTags(sheetXml, "selection").map((tag) => {
+    const activeCell = getTagAttr(tag, "activeCell");
+    const sqref = getTagAttr(tag, "sqref");
 
     return {
       activeCell: activeCell ? normalizeCellAddress(activeCell) : null,
       range: sqref ? normalizeSqref(sqref) : null,
-      pane: normalizePaneName(getXmlAttr(attributesSource, "pane")),
+      pane: normalizePaneName(getTagAttr(tag, "pane")),
     };
   });
 }

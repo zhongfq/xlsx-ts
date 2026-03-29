@@ -36,6 +36,7 @@ import { Zip } from "./zip.js";
 import type { WorkbookContext } from "./workbook-context.js";
 import { resolveWorkbookContext } from "./workbook-context.js";
 import { basenamePosix, dirnamePosix } from "./utils/path.js";
+import { findFirstXmlTag, findXmlTags, getTagAttr } from "./utils/xml-read.js";
 import {
   escapeXmlText,
   decodeXmlText,
@@ -2523,17 +2524,16 @@ function reorderWorkbookXmlSheets(
   currentSheets: Sheet[],
   nextSheets: Sheet[],
 ): string {
-  const sheetsMatch = workbookXml.match(/<sheets>([\s\S]*?)<\/sheets>/);
-  if (!sheetsMatch) {
+  const sheetsTag = findFirstXmlTag(workbookXml, "sheets");
+  if (!sheetsTag || sheetsTag.innerXml === null) {
     throw new XlsxError("Workbook is missing <sheets>");
   }
 
   const sheetNodes = new Map<string, string>();
-  for (const match of sheetsMatch[1].matchAll(/<sheet\b[^>]*\/>/g)) {
-    const sheetXml = match[0];
-    const relationshipId = getXmlAttr(sheetXml, "r:id");
+  for (const sheetTag of findXmlTags(sheetsTag.innerXml, "sheet")) {
+    const relationshipId = getTagAttr(sheetTag, "r:id");
     if (relationshipId) {
-      sheetNodes.set(relationshipId, sheetXml);
+      sheetNodes.set(relationshipId, sheetTag.source);
     }
   }
 
@@ -2619,13 +2619,12 @@ function buildLocalSheetIdMap(currentSheets: Sheet[], nextSheets: Sheet[]): Map<
 }
 
 function parseSheetVisibility(workbookXml: string, relationshipId: string): SheetVisibility {
-  for (const match of workbookXml.matchAll(/<sheet\b([^>]*?)\/>/g)) {
-    const attributesSource = match[1];
-    if (getXmlAttr(attributesSource, "r:id") !== relationshipId) {
+  for (const sheetTag of findXmlTags(workbookXml, "sheet")) {
+    if (getTagAttr(sheetTag, "r:id") !== relationshipId) {
       continue;
     }
 
-    const state = getXmlAttr(attributesSource, "state");
+    const state = getTagAttr(sheetTag, "state");
     if (state === "hidden" || state === "veryHidden") {
       return state;
     }
@@ -2671,8 +2670,8 @@ function updateSheetVisibilityInWorkbookXml(
 }
 
 function parseActiveSheetIndex(workbookXml: string, sheetCount: number): number {
-  const workbookViewMatch = workbookXml.match(/<workbookView\b([^>]*?)\/>/);
-  const activeTabText = workbookViewMatch ? getXmlAttr(workbookViewMatch[1], "activeTab") : undefined;
+  const workbookViewTag = findFirstXmlTag(workbookXml, "workbookView");
+  const activeTabText = workbookViewTag ? getTagAttr(workbookViewTag, "activeTab") : undefined;
   const activeTab = activeTabText === undefined ? 0 : Number(activeTabText);
 
   if (!Number.isInteger(activeTab) || activeTab < 0 || activeTab >= sheetCount) {
@@ -2683,15 +2682,14 @@ function parseActiveSheetIndex(workbookXml: string, sheetCount: number): number 
 }
 
 function updateActiveSheetInWorkbookXml(workbookXml: string, activeSheetIndex: number): string {
-  const workbookViewsMatch = workbookXml.match(/<bookViews>([\s\S]*?)<\/bookViews>/);
+  const workbookViewsTag = findFirstXmlTag(workbookXml, "bookViews");
   const workbookViewXml = `<workbookView activeTab="${activeSheetIndex}"/>`;
 
-  if (!workbookViewsMatch) {
+  if (!workbookViewsTag) {
     return workbookXml.replace(/<sheets>/, `<bookViews>${workbookViewXml}</bookViews><sheets>`);
   }
 
-  const workbookViewsXml = workbookViewsMatch[0];
-  if (!/<workbookView\b/.test(workbookViewsXml)) {
+  if (!findFirstXmlTag(workbookViewsTag.innerXml ?? "", "workbookView")) {
     return workbookXml.replace(/<bookViews>[\s\S]*?<\/bookViews>/, `<bookViews>${workbookViewXml}</bookViews>`);
   }
 
@@ -2713,20 +2711,19 @@ function updateActiveSheetInWorkbookXml(workbookXml: string, activeSheetIndex: n
 }
 
 function parseDefinedNames(workbookXml: string, sheets: Sheet[]): DefinedName[] {
-  return Array.from(
-    workbookXml.matchAll(/<definedName\b([^>]*)>([\s\S]*?)<\/definedName>/g),
-    (match) => {
-      const attributesSource = match[1];
-      const localSheetIdText = getXmlAttr(attributesSource, "localSheetId");
+  return findXmlTags(workbookXml, "definedName")
+    .filter((tag) => tag.innerXml !== null)
+    .map((tag) => {
+      const localSheetIdText = getTagAttr(tag, "localSheetId");
       const localSheetId = localSheetIdText === undefined ? null : Number(localSheetIdText);
       return {
-        hidden: getXmlAttr(attributesSource, "hidden") === "1",
-        name: getXmlAttr(attributesSource, "name") ?? "",
+        hidden: getTagAttr(tag, "hidden") === "1",
+        name: getTagAttr(tag, "name") ?? "",
         scope: localSheetId === null ? null : (sheets[localSheetId]?.name ?? null),
-        value: decodeXmlText(match[2]),
+        value: decodeXmlText(tag.innerXml ?? ""),
       };
-    },
-  ).filter((definedName) => definedName.name.length > 0);
+    })
+    .filter((definedName) => definedName.name.length > 0);
 }
 
 function buildDefinedNameXml(name: string, value: string, localSheetId: number | null): string {
@@ -2739,9 +2736,9 @@ function buildDefinedNameXml(name: string, value: string, localSheetId: number |
 }
 
 function insertDefinedNameIntoWorkbookXml(workbookXml: string, definedNameXml: string): string {
-  const definedNamesMatch = workbookXml.match(/<definedNames\b[^>]*>([\s\S]*?)<\/definedNames>/);
-  if (definedNamesMatch && definedNamesMatch.index !== undefined) {
-    const insertionIndex = definedNamesMatch.index + definedNamesMatch[0].length - "</definedNames>".length;
+  const definedNamesTag = findFirstXmlTag(workbookXml, "definedNames");
+  if (definedNamesTag) {
+    const insertionIndex = definedNamesTag.end - "</definedNames>".length;
     return workbookXml.slice(0, insertionIndex) + definedNameXml + workbookXml.slice(insertionIndex);
   }
 
@@ -2753,12 +2750,12 @@ function removeDefinedNameFromWorkbookXml(
   name: string,
   localSheetId: number | null,
 ): string {
-  const definedNamesMatch = workbookXml.match(/<definedNames\b[^>]*>([\s\S]*?)<\/definedNames>/);
-  if (!definedNamesMatch || definedNamesMatch.index === undefined) {
+  const definedNamesTag = findFirstXmlTag(workbookXml, "definedNames");
+  if (!definedNamesTag || definedNamesTag.innerXml === null) {
     return workbookXml;
   }
 
-  const nextInnerXml = definedNamesMatch[1].replace(
+  const nextInnerXml = definedNamesTag.innerXml.replace(
     /<definedName\b([^>]*)>([\s\S]*?)<\/definedName>/g,
     (match, attributesSource) => {
       const candidateName = getXmlAttr(attributesSource, "name");
@@ -2770,14 +2767,14 @@ function removeDefinedNameFromWorkbookXml(
 
   const nextDefinedNamesXml = `<definedNames>${nextInnerXml}</definedNames>`;
   const nextWorkbookXml =
-    workbookXml.slice(0, definedNamesMatch.index) +
+    workbookXml.slice(0, definedNamesTag.start) +
     nextDefinedNamesXml +
-    workbookXml.slice(definedNamesMatch.index + definedNamesMatch[0].length);
+    workbookXml.slice(definedNamesTag.end);
 
   return /<definedName\b/.test(nextInnerXml)
     ? nextWorkbookXml
-    : workbookXml.slice(0, definedNamesMatch.index) +
-        workbookXml.slice(definedNamesMatch.index + definedNamesMatch[0].length);
+    : workbookXml.slice(0, definedNamesTag.start) +
+        workbookXml.slice(definedNamesTag.end);
 }
 
 function removeSheetFromWorkbookXml(

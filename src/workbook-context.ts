@@ -1,7 +1,7 @@
 import { Sheet } from "./sheet.js";
 import type { Workbook } from "./workbook.js";
 import { basenamePosix, dirnamePosix, resolvePosix } from "./utils/path.js";
-import { getXmlAttr } from "./utils/xml.js";
+import { findXmlTags, getTagAttr } from "./utils/xml-read.js";
 
 export interface WorkbookContext {
   workbookDir: string;
@@ -41,10 +41,13 @@ export function resolveWorkbookContext(
 function parseRelationships(xml: string, baseDir: string): Map<string, string> {
   const relationships = new Map<string, string>();
 
-  for (const match of xml.matchAll(/<Relationship\b([^>]*?)\/>/g)) {
-    const attributesSource = match[1];
-    const id = getXmlAttr(attributesSource, "Id");
-    const target = getXmlAttr(attributesSource, "Target");
+  for (const relationshipTag of findXmlTags(xml, "Relationship")) {
+    if (!relationshipTag.selfClosing) {
+      continue;
+    }
+
+    const id = getTagAttr(relationshipTag, "Id");
+    const target = getTagAttr(relationshipTag, "Target");
 
     if (!id || !target) {
       continue;
@@ -63,10 +66,9 @@ function parseSheets(
 ): Sheet[] {
   const sheets: Sheet[] = [];
 
-  for (const match of workbookXml.matchAll(/<sheet\b([^>]*?)(?:\/>|>[\s\S]*?<\/sheet>)/g)) {
-    const attributesSource = match[1];
-    const name = getXmlAttr(attributesSource, "name");
-    const relationshipId = getXmlAttr(attributesSource, "r:id");
+  for (const sheetTag of findXmlTags(workbookXml, "sheet")) {
+    const name = getTagAttr(sheetTag, "name");
+    const relationshipId = getTagAttr(sheetTag, "r:id");
 
     if (!name || !relationshipId) {
       continue;
@@ -94,10 +96,13 @@ function findRelationshipTarget(
   typePattern: RegExp,
   baseDir = "",
 ): string | undefined {
-  for (const match of xml.matchAll(/<Relationship\b([^>]*?)\/>/g)) {
-    const attributesSource = match[1];
-    const type = getXmlAttr(attributesSource, "Type");
-    const target = getXmlAttr(attributesSource, "Target");
+  for (const relationshipTag of findXmlTags(xml, "Relationship")) {
+    if (!relationshipTag.selfClosing) {
+      continue;
+    }
+
+    const type = getTagAttr(relationshipTag, "Type");
+    const target = getTagAttr(relationshipTag, "Target");
 
     if (!type || !target || !typePattern.test(type)) {
       continue;

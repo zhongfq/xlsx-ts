@@ -33,10 +33,10 @@
     "node": ">=20"
   },
   "scripts": {
-    "clean": "node scripts/clean-dist.mjs",
+    "clean": "node --import tsx scripts/clean-dist.ts",
     "build": "npm run clean && tsc -p tsconfig.json",
     "cli": "node --import tsx src/cli.ts",
-    "pack:check": "node scripts/check-pack.mjs",
+    "pack:check": "node --import tsx scripts/check-pack.ts",
     "test": "node --import tsx --test test/**/*.test.ts",
     "prepublishOnly": "npm run build && npm test && npm run pack:check",
     "release": "npm publish --access public",

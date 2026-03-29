@@ -2469,27 +2469,23 @@ function renameSheetInWorkbookXml(
   currentSheetName: string,
   nextSheetName: string,
 ): string {
-  const renamedWorkbookXml = workbookXml.replace(
-    /<sheet\b([^>]*?)\/>/g,
-    (match, attributesSource) => {
-      const attributes = parseAttributes(attributesSource);
-      const relationshipIndex = attributes.findIndex(([name]) => name === "r:id");
+  const renamedWorkbookXml = rewriteSheetsInWorkbookXml(workbookXml, (sheetTag) => {
+    const attributes = parseAttributes(sheetTag.attributesSource);
+    const relationshipIndex = attributes.findIndex(([name]) => name === "r:id");
 
-      if (relationshipIndex === -1 || attributes[relationshipIndex]?.[1] !== relationshipId) {
-        return match;
+    if (relationshipIndex === -1 || attributes[relationshipIndex]?.[1] !== relationshipId) {
+      return sheetTag.source;
+    }
+
+    const nextAttributes = attributes.map(([name, value]) => {
+      if (name === "name") {
+        return [name, nextSheetName] as [string, string];
       }
 
-      const nextAttributes = attributes.map(([name, value]) => {
-        if (name === "name") {
-          return [name, nextSheetName] as [string, string];
-        }
-
-        return [name, value] as [string, string];
-      });
-      const serializedAttributes = serializeAttributes(nextAttributes);
-      return `<sheet ${serializedAttributes}/>`;
-    },
-  );
+      return [name, value] as [string, string];
+    });
+    return buildSheetTagXml(nextAttributes);
+  }).workbookXml;
 
   return rewriteDefinedNamesInWorkbookXml(renamedWorkbookXml, (tag) => {
     const nameText = decodeXmlText(tag.innerXml ?? "");
@@ -2528,8 +2524,8 @@ function reorderWorkbookXmlSheets(
     .join("");
   const localSheetIdMap = buildLocalSheetIdMap(currentSheets, nextSheets);
   const nextWorkbookXml = replaceXmlTagSource(workbookXml, sheetsTag, `<sheets>${reorderedSheetsXml}</sheets>`);
-
-  return rewriteDefinedNamesInWorkbookXml(nextWorkbookXml, (tag) => {
+  const nextActiveTab = localSheetIdMap.get(parseActiveSheetIndex(workbookXml, currentSheets.length));
+  const rewrittenDefinedNamesWorkbookXml = rewriteDefinedNamesInWorkbookXml(nextWorkbookXml, (tag) => {
     const attributes = parseAttributes(tag.attributesSource);
     const localSheetIdIndex = attributes.findIndex(([name]) => name === "localSheetId");
     if (localSheetIdIndex === -1) {
@@ -2548,31 +2544,13 @@ function reorderWorkbookXmlSheets(
 
     attributes[localSheetIdIndex] = ["localSheetId", String(nextLocalSheetId)];
     return buildDefinedNameTagXml(attributes, decodeXmlText(tag.innerXml ?? ""));
-  }).workbookXml
-    .replace(
-      /<workbookView\b([^>]*?)\/>/g,
-      (match, attributesSource) => {
-        const attributes = parseAttributes(attributesSource);
-        const activeTabIndex = attributes.findIndex(([name]) => name === "activeTab");
-        if (activeTabIndex === -1) {
-          return match;
-        }
+  }).workbookXml;
 
-        const activeTabText = attributes[activeTabIndex]?.[1];
-        if (activeTabText === undefined) {
-          return match;
-        }
+  if (nextActiveTab !== undefined) {
+    return updateWorkbookViewActiveTab(rewrittenDefinedNamesWorkbookXml, nextActiveTab);
+  }
 
-        const nextActiveTab = localSheetIdMap.get(Number(activeTabText));
-        if (nextActiveTab === undefined) {
-          return match;
-        }
-
-        attributes[activeTabIndex] = ["activeTab", String(nextActiveTab)];
-        const serializedAttributes = serializeAttributes(attributes);
-        return `<workbookView${serializedAttributes ? ` ${serializedAttributes}` : ""}/>`;
-      },
-    );
+  return rewrittenDefinedNamesWorkbookXml;
 }
 
 function buildLocalSheetIdMap(currentSheets: Sheet[], nextSheets: Sheet[]): Map<number, number> {
@@ -2614,33 +2592,27 @@ function updateSheetVisibilityInWorkbookXml(
   relationshipId: string,
   visibility: SheetVisibility,
 ): string {
-  let changed = false;
+  const replacement = rewriteSheetsInWorkbookXml(workbookXml, (sheetTag) => {
+    const attributes = parseAttributes(sheetTag.attributesSource);
+    const relationshipIndex = attributes.findIndex(([name]) => name === "r:id");
 
-  const nextWorkbookXml = workbookXml.replace(
-    /<sheet\b([^>]*?)\/>/g,
-    (match, attributesSource) => {
-      const attributes = parseAttributes(attributesSource);
-      const relationshipIndex = attributes.findIndex(([name]) => name === "r:id");
+    if (relationshipIndex === -1 || attributes[relationshipIndex]?.[1] !== relationshipId) {
+      return sheetTag.source;
+    }
 
-      if (relationshipIndex === -1 || attributes[relationshipIndex]?.[1] !== relationshipId) {
-        return match;
-      }
+    const withoutState = attributes.filter(([name]) => name !== "state");
+    const nextAttributes =
+      visibility === "visible"
+        ? withoutState
+        : [...withoutState, ["state", visibility] as [string, string]];
+    return buildSheetTagXml(nextAttributes);
+  });
 
-      changed = true;
-      const withoutState = attributes.filter(([name]) => name !== "state");
-      const nextAttributes =
-        visibility === "visible"
-          ? withoutState
-          : [...withoutState, ["state", visibility] as [string, string]];
-      return `<sheet ${serializeAttributes(nextAttributes)}/>`;
-    },
-  );
-
-  if (!changed) {
+  if (!replacement.changed) {
     throw new XlsxError(`Sheet relationship not found: ${relationshipId}`);
   }
 
-  return nextWorkbookXml;
+  return replacement.workbookXml;
 }
 
 function parseActiveSheetIndex(workbookXml: string, sheetCount: number): number {
@@ -2656,32 +2628,7 @@ function parseActiveSheetIndex(workbookXml: string, sheetCount: number): number 
 }
 
 function updateActiveSheetInWorkbookXml(workbookXml: string, activeSheetIndex: number): string {
-  const workbookViewsTag = findFirstXmlTag(workbookXml, "bookViews");
-  const workbookViewXml = `<workbookView activeTab="${activeSheetIndex}"/>`;
-
-  if (!workbookViewsTag) {
-    return workbookXml.replace(/<sheets>/, `<bookViews>${workbookViewXml}</bookViews><sheets>`);
-  }
-
-  if (!findFirstXmlTag(workbookViewsTag.innerXml ?? "", "workbookView")) {
-    return workbookXml.replace(/<bookViews>[\s\S]*?<\/bookViews>/, `<bookViews>${workbookViewXml}</bookViews>`);
-  }
-
-  return workbookXml.replace(
-    /<workbookView\b([^>]*?)\/>/,
-    (match, attributesSource) => {
-      const attributes = parseAttributes(attributesSource);
-      const activeTabIndex = attributes.findIndex(([name]) => name === "activeTab");
-      if (activeTabIndex === -1) {
-        attributes.push(["activeTab", String(activeSheetIndex)]);
-      } else {
-        attributes[activeTabIndex] = ["activeTab", String(activeSheetIndex)];
-      }
-
-      const serializedAttributes = serializeAttributes(attributes);
-      return `<workbookView${serializedAttributes ? ` ${serializedAttributes}` : ""}/>`;
-    },
-  );
+  return updateWorkbookViewActiveTab(workbookXml, activeSheetIndex);
 }
 
 function parseDefinedNames(workbookXml: string, sheets: Sheet[]): DefinedName[] {
@@ -2702,6 +2649,96 @@ function parseDefinedNames(workbookXml: string, sheets: Sheet[]): DefinedName[] 
 
 function replaceXmlTagSource(xml: string, tag: XmlTag, nextSource: string): string {
   return xml.slice(0, tag.start) + nextSource + xml.slice(tag.end);
+}
+
+function getXmlTagInnerStart(tag: XmlTag): number {
+  if (tag.innerXml === null) {
+    return tag.end;
+  }
+
+  return tag.end - tag.innerXml.length - `</${tag.tagName}>`.length;
+}
+
+function replaceNestedXmlTagSource(xml: string, parentTag: XmlTag, childTag: XmlTag, nextSource: string): string {
+  const parentInnerStart = getXmlTagInnerStart(parentTag);
+  return (
+    xml.slice(0, parentInnerStart + childTag.start) +
+    nextSource +
+    xml.slice(parentInnerStart + childTag.end)
+  );
+}
+
+function buildSheetTagXml(attributes: Array<[string, string]>): string {
+  return `<sheet ${serializeAttributes(attributes)}/>`;
+}
+
+function rewriteSheetsInWorkbookXml(
+  workbookXml: string,
+  transform: (tag: XmlTag) => string,
+): { changed: boolean; workbookXml: string } {
+  const sheetsTag = findFirstXmlTag(workbookXml, "sheets");
+  if (!sheetsTag || sheetsTag.innerXml === null) {
+    return { changed: false, workbookXml };
+  }
+
+  const nextSheetSources: string[] = [];
+  let changed = false;
+
+  for (const sheetTag of findXmlTags(sheetsTag.innerXml, "sheet")) {
+    const nextSource = transform(sheetTag);
+    if (nextSource !== sheetTag.source) {
+      changed = true;
+    }
+
+    if (nextSource.length > 0) {
+      nextSheetSources.push(nextSource);
+    }
+  }
+
+  if (!changed) {
+    return { changed: false, workbookXml };
+  }
+
+  return {
+    changed: true,
+    workbookXml: replaceXmlTagSource(workbookXml, sheetsTag, `<sheets>${nextSheetSources.join("")}</sheets>`),
+  };
+}
+
+function updateWorkbookViewActiveTab(workbookXml: string, activeSheetIndex: number): string {
+  const workbookViewXml = `<workbookView activeTab="${activeSheetIndex}"/>`;
+  const bookViewsTag = findFirstXmlTag(workbookXml, "bookViews");
+
+  if (!bookViewsTag) {
+    const sheetsTag = findFirstXmlTag(workbookXml, "sheets");
+    if (!sheetsTag) {
+      return workbookXml;
+    }
+
+    return workbookXml.slice(0, sheetsTag.start) + `<bookViews>${workbookViewXml}</bookViews>` + workbookXml.slice(sheetsTag.start);
+  }
+
+  const workbookViewTag =
+    bookViewsTag.innerXml === null ? null : findFirstXmlTag(bookViewsTag.innerXml, "workbookView");
+  if (!workbookViewTag) {
+    return replaceXmlTagSource(workbookXml, bookViewsTag, `<bookViews>${workbookViewXml}</bookViews>`);
+  }
+
+  const attributes = parseAttributes(workbookViewTag.attributesSource);
+  const activeTabIndex = attributes.findIndex(([name]) => name === "activeTab");
+  if (activeTabIndex === -1) {
+    attributes.push(["activeTab", String(activeSheetIndex)]);
+  } else {
+    attributes[activeTabIndex] = ["activeTab", String(activeSheetIndex)];
+  }
+
+  const serializedAttributes = serializeAttributes(attributes);
+  return replaceNestedXmlTagSource(
+    workbookXml,
+    bookViewsTag,
+    workbookViewTag,
+    `<workbookView${serializedAttributes ? ` ${serializedAttributes}` : ""}/>`,
+  );
 }
 
 function buildDefinedNameTagSource(attributesSource: string, value: string): string {
@@ -2795,10 +2832,9 @@ function removeSheetFromWorkbookXml(
   deletedSheetName: string,
   deletedSheetIndex: number,
 ): string {
-  const withoutSheet = workbookXml.replace(
-    new RegExp(`<sheet\\b[^>]*\\br:id\\s*=\\s*["']${escapeRegex(relationshipId)}["'][^>]*/>`),
-    "",
-  );
+  const withoutSheet = rewriteSheetsInWorkbookXml(workbookXml, (sheetTag) =>
+    getTagAttr(sheetTag, "r:id") === relationshipId ? "" : sheetTag.source,
+  ).workbookXml;
 
   return rewriteDefinedNamesInWorkbookXml(withoutSheet, (tag) => {
     const attributes = parseAttributes(tag.attributesSource);

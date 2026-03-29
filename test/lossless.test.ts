@@ -2701,6 +2701,65 @@ test("sheet addTable and removeTable manage package parts", async () => {
   assert.doesNotMatch(contentTypesXml, /spreadsheetml\.table\+xml/);
 });
 
+test("sheet table metadata tolerates single-quoted table and tableParts tags", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = convertEntriesToSingleQuotedAttributes(
+    withSheetTable(
+      replaceEntryText(
+        await loadFixtureEntries(fixtureDir),
+        "xl/worksheets/sheet1.xml",
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData>
+    <row r="1">
+      <c r="A1"><v>1</v></c>
+      <c r="B1"><v>2</v></c>
+    </row>
+    <row r="2">
+      <c r="A2"><v>3</v></c>
+      <c r="B2"><v>4</v></c>
+    </row>
+  </sheetData>
+  <tableParts count="1"><tablePart r:id="rIdTable1"/></tableParts>
+</worksheet>`,
+      ),
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="Sales" displayName="Sales" ref="A1:B2" totalsRowShown="0">
+  <autoFilter ref="A1:B2"/>
+  <tableColumns count="2">
+    <tableColumn id="1" name="A"/>
+    <tableColumn id="2" name="B"/>
+  </tableColumns>
+</table>`,
+    ),
+    ["xl/worksheets/sheet1.xml", "xl/worksheets/_rels/sheet1.xml.rels", "xl/tables/table1.xml"],
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  assert.deepEqual(sheet.getTables(), [
+    { name: "Sales", displayName: "Sales", range: "A1:B2", path: "xl/tables/table1.xml" },
+  ]);
+
+  sheet.insertColumn("B");
+
+  assert.deepEqual(sheet.getTables(), [
+    { name: "Sales", displayName: "Sales", range: "A1:C2", path: "xl/tables/table1.xml" },
+  ]);
+
+  let tableXml = entryText(workbook.toEntries(), "xl/tables/table1.xml");
+  assert.match(tableXml, /<table [^>]*ref="A1:C2"[^>]*>/);
+  assert.match(tableXml, /<autoFilter ref="A1:C2"\/>/);
+
+  sheet.removeTable("Sales");
+
+  tableXml = workbook.listEntries().includes("xl/tables/table1.xml") ? entryText(workbook.toEntries(), "xl/tables/table1.xml") : "";
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.deepEqual(sheet.getTables(), []);
+  assert.equal(tableXml, "");
+  assert.doesNotMatch(sheetXml, /<tableParts\b/);
+});
+
 test("row APIs read sparse rows and write from a column offset", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = await loadFixtureEntries(fixtureDir);

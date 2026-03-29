@@ -639,15 +639,14 @@ export class Sheet {
 
     for (const table of this.getTableReferences()) {
       const tableXml = this.workbook.readEntryText(table.path);
-      const tableTagMatch = tableXml.match(/<table\b([^>]*?)>/);
-      if (!tableTagMatch) {
+      const tableTag = findFirstXmlTag(tableXml, "table");
+      if (!tableTag) {
         continue;
       }
 
-      const attributesSource = tableTagMatch[1];
-      const name = getXmlAttr(attributesSource, "name");
-      const displayName = getXmlAttr(attributesSource, "displayName");
-      const range = getXmlAttr(attributesSource, "ref");
+      const name = getTagAttr(tableTag, "name");
+      const displayName = getTagAttr(tableTag, "displayName");
+      const range = getTagAttr(tableTag, "ref");
 
       if (!name || !displayName || !range) {
         continue;
@@ -832,9 +831,12 @@ export class Sheet {
   removeTable(name: string): void {
     const tableReference = this.getTableReferences().find((table) => {
       const tableXml = this.workbook.readEntryText(table.path);
-      const tableTagMatch = tableXml.match(/<table\b([^>]*?)>/);
-      const attributesSource = tableTagMatch?.[1] ?? "";
-      return getXmlAttr(attributesSource, "name") === name || getXmlAttr(attributesSource, "displayName") === name;
+      const tableTag = findFirstXmlTag(tableXml, "table");
+      if (!tableTag) {
+        return false;
+      }
+
+      return getTagAttr(tableTag, "name") === name || getTagAttr(tableTag, "displayName") === name;
     });
 
     if (!tableReference) {
@@ -3361,12 +3363,12 @@ function rewriteTableReferenceXml(
   tableXml: string,
   transformRange: (range: string) => string | null,
 ): string | null {
-  const tableMatch = tableXml.match(/<table\b([^>]*?)>/);
-  if (!tableMatch) {
+  const tableTag = findFirstXmlTag(tableXml, "table");
+  if (!tableTag) {
     return tableXml;
   }
 
-  const tableAttributes = parseAttributes(tableMatch[1]);
+  const tableAttributes = parseAttributes(tableTag.attributesSource);
   const refIndex = tableAttributes.findIndex(([name]) => name === "ref");
   if (refIndex === -1) {
     return tableXml;
@@ -3380,60 +3382,58 @@ function rewriteTableReferenceXml(
 
   const nextTableAttributes = [...tableAttributes];
   nextTableAttributes[refIndex] = ["ref", nextRange];
-  let nextTableXml =
-    tableXml.slice(0, tableMatch.index) +
-    `<table ${serializeAttributes(nextTableAttributes)}>` +
-    tableXml.slice((tableMatch.index ?? 0) + tableMatch[0].length);
+  let nextTableXml = replaceXmlTagSource(
+    tableXml,
+    tableTag,
+    buildXmlElement("table", nextTableAttributes, tableTag.innerXml ?? ""),
+  );
+  const autoFilterTag = findFirstXmlTag(nextTableXml, "autoFilter");
 
-  nextTableXml = nextTableXml.replace(/<autoFilter\b([^>]*?)\/>/g, (match, attributesSource) => {
-    const attributes = parseAttributes(attributesSource);
+  if (autoFilterTag) {
+    const attributes = parseAttributes(autoFilterTag.attributesSource);
     const autoFilterRefIndex = attributes.findIndex(([name]) => name === "ref");
 
-    if (autoFilterRefIndex === -1) {
-      return match;
-    }
+    if (autoFilterRefIndex !== -1) {
+      const autoFilterRange = attributes[autoFilterRefIndex]?.[1] ?? "";
+      const nextAutoFilterRange = transformRange(autoFilterRange);
 
-    const autoFilterRange = attributes[autoFilterRefIndex]?.[1] ?? "";
-    const nextAutoFilterRange = transformRange(autoFilterRange);
-    if (nextAutoFilterRange === null) {
-      return "";
+      if (nextAutoFilterRange === null) {
+        nextTableXml = replaceXmlTagSource(nextTableXml, autoFilterTag, "");
+      } else {
+        const nextAttributes = [...attributes];
+        nextAttributes[autoFilterRefIndex] = ["ref", nextAutoFilterRange];
+        nextTableXml = replaceXmlTagSource(nextTableXml, autoFilterTag, buildSelfClosingXmlElement("autoFilter", nextAttributes));
+      }
     }
-
-    const nextAttributes = [...attributes];
-    nextAttributes[autoFilterRefIndex] = ["ref", nextAutoFilterRange];
-    return `<autoFilter ${serializeAttributes(nextAttributes)}/>`;
-  });
+  }
 
   return nextTableXml;
 }
 
 function removeTablePartsFromSheetXml(sheetXml: string, relationshipIds: string[]): string {
-  const tablePartsMatch = sheetXml.match(/<tableParts\b[^>]*>([\s\S]*?)<\/tableParts>/);
-  if (!tablePartsMatch || tablePartsMatch.index === undefined) {
+  const tablePartsTag = findFirstXmlTag(sheetXml, "tableParts");
+  if (!tablePartsTag || tablePartsTag.innerXml === null) {
     return sheetXml;
   }
 
-  const keptTableParts = Array.from(
-    tablePartsMatch[1].matchAll(/<tablePart\b([^>]*?)\/>/g),
-    (match) => {
-      const attributesSource = match[1];
-      return {
-        relationshipId: getXmlAttr(attributesSource, "r:id"),
-        xml: `<tablePart${attributesSource ? ` ${attributesSource.trim()}` : ""}/>`,
-      };
-    },
-  ).filter((tablePart) => tablePart.relationshipId && !relationshipIds.includes(tablePart.relationshipId));
+  const keptTableParts = findXmlTags(tablePartsTag.innerXml, "tablePart")
+    .map((tablePartTag) => ({
+      relationshipId: getTagAttr(tablePartTag, "r:id"),
+      xml: tablePartTag.source,
+    }))
+    .filter((tablePart) => tablePart.relationshipId && !relationshipIds.includes(tablePart.relationshipId));
 
   const nextTablePartsXml =
     keptTableParts.length === 0
       ? ""
-      : `<tableParts count="${keptTableParts.length}">${keptTableParts.map((tablePart) => tablePart.xml).join("")}</tableParts>`;
+      : buildCountedXmlContainer(
+          "tableParts",
+          tablePartsTag.attributesSource,
+          "count",
+          keptTableParts.map((tablePart) => tablePart.xml),
+        );
 
-  return (
-    sheetXml.slice(0, tablePartsMatch.index) +
-    nextTablePartsXml +
-    sheetXml.slice(tablePartsMatch.index + tablePartsMatch[0].length)
-  );
+  return replaceXmlTagSource(sheetXml, tablePartsTag, nextTablePartsXml);
 }
 
 function parseSheetAutoFilter(sheetXml: string): string | null {
@@ -3511,6 +3511,16 @@ function buildCountedXmlContainer(
 
   const serializedAttributes = serializeAttributes(nextAttributes);
   return `<${tagName}${serializedAttributes ? ` ${serializedAttributes}` : ""}>${childXml.join("")}</${tagName}>`;
+}
+
+function buildXmlElement(tagName: string, attributes: Array<[string, string]>, innerXml: string): string {
+  const serializedAttributes = serializeAttributes(attributes);
+  return `<${tagName}${serializedAttributes ? ` ${serializedAttributes}` : ""}>${innerXml}</${tagName}>`;
+}
+
+function buildSelfClosingXmlElement(tagName: string, attributes: Array<[string, string]>): string {
+  const serializedAttributes = serializeAttributes(attributes);
+  return `<${tagName}${serializedAttributes ? ` ${serializedAttributes}` : ""}/>`;
 }
 
 function parseSheetFreezePane(sheetXml: string): FreezePane | null {
@@ -4031,7 +4041,8 @@ function getNextTableId(entryPaths: string[], workbook: Workbook): number {
     }
 
     const tableXml = workbook.readEntryText(path);
-    const idText = getXmlAttr(tableXml.match(/<table\b([^>]*?)>/)?.[1] ?? "", "id");
+    const tableTag = findFirstXmlTag(tableXml, "table");
+    const idText = tableTag ? getTagAttr(tableTag, "id") : undefined;
     if (idText) {
       nextId = Math.max(nextId, Number(idText) + 1);
     }
@@ -4100,8 +4111,13 @@ function buildTableColumnNames(headerValues: CellValue[], width: number): string
 function getNextRelationshipIdFromXml(relationshipsXml: string): string {
   let nextId = 1;
 
-  for (const match of relationshipsXml.matchAll(/\bId\s*=\s*["']rId(\d+)["']/g)) {
-    nextId = Math.max(nextId, Number(match[1]) + 1);
+  for (const relationshipTag of findXmlTags(relationshipsXml, "Relationship")) {
+    const relationshipId = getTagAttr(relationshipTag, "Id");
+    if (!relationshipId?.startsWith("rId")) {
+      continue;
+    }
+
+    nextId = Math.max(nextId, Number(relationshipId.slice(3)) + 1);
   }
 
   return `rId${nextId}`;
@@ -4197,18 +4213,14 @@ function makeRelativeSheetRelationshipTarget(sheetPath: string, targetPath: stri
 }
 
 function appendTablePart(sheetXml: string, relationshipId: string): string {
-  const tablePartsMatch = sheetXml.match(/<tableParts\b[^>]*>([\s\S]*?)<\/tableParts>/);
-  if (tablePartsMatch && tablePartsMatch.index !== undefined) {
-    const tableParts = findXmlTags(tablePartsMatch[1], "tablePart")
+  const tablePartsTag = findFirstXmlTag(sheetXml, "tableParts");
+  if (tablePartsTag && tablePartsTag.innerXml !== null) {
+    const tableParts = findXmlTags(tablePartsTag.innerXml, "tablePart")
       .filter((tag) => tag.selfClosing)
       .map((tag) => tag.source);
     tableParts.push(`<tablePart r:id="${relationshipId}"/>`);
-    const nextTablePartsXml = `<tableParts count="${tableParts.length}">${tableParts.join("")}</tableParts>`;
-    return (
-      sheetXml.slice(0, tablePartsMatch.index) +
-      nextTablePartsXml +
-      sheetXml.slice(tablePartsMatch.index + tablePartsMatch[0].length)
-    );
+    const nextTablePartsXml = buildCountedXmlContainer("tableParts", tablePartsTag.attributesSource, "count", tableParts);
+    return replaceXmlTagSource(sheetXml, tablePartsTag, nextTablePartsXml);
   }
 
   const closingTag = "</worksheet>";

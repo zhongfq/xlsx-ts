@@ -1004,50 +1004,34 @@ function parseNumberFormats(stylesXml: string): Map<number, string> {
 }
 
 function parseBorder(borderXml: string): ParsedBorder {
-  if (/^<border\b[^>]*\/>$/.test(borderXml)) {
-    return {
-      definition: buildEmptyBorderDefinition(),
-      extraChildrenXml: "",
-    };
-  }
+  const borderTag = findFirstXmlTag(borderXml, "border");
+  const borderAttributes = parseAttributes(borderTag?.attributesSource ?? "");
+  let remainingXml = borderTag?.innerXml ?? "";
 
-  const borderMatch = borderXml.match(/<border\b([^>]*?)>([\s\S]*?)<\/border>/);
-  const borderAttributes = parseAttributes(borderMatch?.[1] ?? "");
-  let remainingXml = borderMatch?.[2] ?? "";
-
-  const [leftXml, remainingAfterLeft] = takeFirstTag(remainingXml, /<left\b([^>]*?)(?:\/>|>[\s\S]*?<\/left>)/);
+  const [leftTag, remainingAfterLeft] = takeFirstXmlTagByName(remainingXml, "left");
   remainingXml = remainingAfterLeft;
-  const [rightXml, remainingAfterRight] = takeFirstTag(remainingXml, /<right\b([^>]*?)(?:\/>|>[\s\S]*?<\/right>)/);
+  const [rightTag, remainingAfterRight] = takeFirstXmlTagByName(remainingXml, "right");
   remainingXml = remainingAfterRight;
-  const [topXml, remainingAfterTop] = takeFirstTag(remainingXml, /<top\b([^>]*?)(?:\/>|>[\s\S]*?<\/top>)/);
+  const [topTag, remainingAfterTop] = takeFirstXmlTagByName(remainingXml, "top");
   remainingXml = remainingAfterTop;
-  const [bottomXml, remainingAfterBottom] = takeFirstTag(remainingXml, /<bottom\b([^>]*?)(?:\/>|>[\s\S]*?<\/bottom>)/);
+  const [bottomTag, remainingAfterBottom] = takeFirstXmlTagByName(remainingXml, "bottom");
   remainingXml = remainingAfterBottom;
-  const [diagonalXml, remainingAfterDiagonal] = takeFirstTag(
-    remainingXml,
-    /<diagonal\b([^>]*?)(?:\/>|>[\s\S]*?<\/diagonal>)/,
-  );
+  const [diagonalTag, remainingAfterDiagonal] = takeFirstXmlTagByName(remainingXml, "diagonal");
   remainingXml = remainingAfterDiagonal;
-  const [verticalXml, remainingAfterVertical] = takeFirstTag(
-    remainingXml,
-    /<vertical\b([^>]*?)(?:\/>|>[\s\S]*?<\/vertical>)/,
-  );
+  const [verticalTag, remainingAfterVertical] = takeFirstXmlTagByName(remainingXml, "vertical");
   remainingXml = remainingAfterVertical;
-  const [horizontalXml, remainingAfterHorizontal] = takeFirstTag(
-    remainingXml,
-    /<horizontal\b([^>]*?)(?:\/>|>[\s\S]*?<\/horizontal>)/,
-  );
+  const [horizontalTag, remainingAfterHorizontal] = takeFirstXmlTagByName(remainingXml, "horizontal");
   remainingXml = remainingAfterHorizontal;
 
   return {
     definition: {
-      left: parseBorderSideDefinition(leftXml),
-      right: parseBorderSideDefinition(rightXml),
-      top: parseBorderSideDefinition(topXml),
-      bottom: parseBorderSideDefinition(bottomXml),
-      diagonal: parseBorderSideDefinition(diagonalXml),
-      vertical: parseBorderSideDefinition(verticalXml),
-      horizontal: parseBorderSideDefinition(horizontalXml),
+      left: parseBorderSideDefinition(leftTag?.source ?? null),
+      right: parseBorderSideDefinition(rightTag?.source ?? null),
+      top: parseBorderSideDefinition(topTag?.source ?? null),
+      bottom: parseBorderSideDefinition(bottomTag?.source ?? null),
+      diagonal: parseBorderSideDefinition(diagonalTag?.source ?? null),
+      vertical: parseBorderSideDefinition(verticalTag?.source ?? null),
+      horizontal: parseBorderSideDefinition(horizontalTag?.source ?? null),
       diagonalUp: parseOptionalBooleanAttribute(borderAttributes, "diagonalUp"),
       diagonalDown: parseOptionalBooleanAttribute(borderAttributes, "diagonalDown"),
       outline: parseOptionalBooleanAttribute(borderAttributes, "outline"),
@@ -1057,99 +1041,84 @@ function parseBorder(borderXml: string): ParsedBorder {
 }
 
 function parseFill(fillXml: string): ParsedFill {
-  if (/^<fill\b[^>]*\/>$/.test(fillXml)) {
-    return {
-      definition: buildEmptyFillDefinition(),
-      extraChildrenXml: "",
-    };
-  }
-
-  const innerXml = fillXml.match(/<fill\b[^>]*>([\s\S]*?)<\/fill>/)?.[1] ?? "";
-  const patternFillMatch = innerXml.match(/<patternFill\b([^>]*?)(?:\/>|>([\s\S]*?)<\/patternFill>)/);
-  if (!patternFillMatch || patternFillMatch.index === undefined) {
+  const fillTag = findFirstXmlTag(fillXml, "fill");
+  const innerXml = fillTag?.innerXml ?? "";
+  const [patternFillTag, remainingXml] = takeFirstXmlTagByName(innerXml, "patternFill");
+  if (!patternFillTag) {
     return {
       definition: buildEmptyFillDefinition(),
       extraChildrenXml: /\S/.test(innerXml) ? innerXml : "",
     };
   }
 
-  const patternAttributes = parseAttributes(patternFillMatch[1]);
-  const patternInnerXml = patternFillMatch[2] ?? "";
-  const remainingXml =
-    innerXml.slice(0, patternFillMatch.index) + innerXml.slice(patternFillMatch.index + patternFillMatch[0].length);
+  const patternAttributes = parseAttributes(patternFillTag.attributesSource);
+  const patternInnerXml = patternFillTag.innerXml ?? "";
+  const fgColorTag = findFirstXmlTag(patternInnerXml, "fgColor");
+  const bgColorTag = findFirstXmlTag(patternInnerXml, "bgColor");
 
   return {
     definition: {
       patternType: findAttributeValue(patternAttributes, "patternType") ?? null,
-      fgColor: parseFillColorDefinition(patternInnerXml.match(/<fgColor\b([^>]*?)(?:\/>|>[\s\S]*?<\/fgColor>)/)?.[0] ?? null),
-      bgColor: parseFillColorDefinition(patternInnerXml.match(/<bgColor\b([^>]*?)(?:\/>|>[\s\S]*?<\/bgColor>)/)?.[0] ?? null),
+      fgColor: parseFillColorDefinition(fgColorTag?.source ?? null),
+      bgColor: parseFillColorDefinition(bgColorTag?.source ?? null),
     },
     extraChildrenXml: /\S/.test(remainingXml) ? remainingXml : "",
   };
 }
 
 function parseFont(fontXml: string): ParsedFont {
-  if (/^<font\b[^>]*\/>$/.test(fontXml)) {
-    return {
-      definition: buildEmptyFontDefinition(),
-      extraChildrenXml: "",
-    };
-  }
-
-  const innerXml = fontXml.match(/<font\b[^>]*>([\s\S]*?)<\/font>/)?.[1] ?? "";
+  const fontTag = findFirstXmlTag(fontXml, "font");
+  const innerXml = fontTag?.innerXml ?? "";
   let remainingXml = innerXml;
 
-  const [boldXml, remainingAfterBold] = takeFirstTag(remainingXml, /<b\b[^>]*?(?:\/>|>[\s\S]*?<\/b>)/);
+  const [boldTag, remainingAfterBold] = takeFirstXmlTagByName(remainingXml, "b");
   remainingXml = remainingAfterBold;
-  const [italicXml, remainingAfterItalic] = takeFirstTag(remainingXml, /<i\b[^>]*?(?:\/>|>[\s\S]*?<\/i>)/);
+  const [italicTag, remainingAfterItalic] = takeFirstXmlTagByName(remainingXml, "i");
   remainingXml = remainingAfterItalic;
-  const [underlineXml, remainingAfterUnderline] = takeFirstTag(remainingXml, /<u\b([^>]*?)(?:\/>|>[\s\S]*?<\/u>)/);
+  const [underlineTag, remainingAfterUnderline] = takeFirstXmlTagByName(remainingXml, "u");
   remainingXml = remainingAfterUnderline;
-  const [strikeXml, remainingAfterStrike] = takeFirstTag(remainingXml, /<strike\b[^>]*?(?:\/>|>[\s\S]*?<\/strike>)/);
+  const [strikeTag, remainingAfterStrike] = takeFirstXmlTagByName(remainingXml, "strike");
   remainingXml = remainingAfterStrike;
-  const [outlineXml, remainingAfterOutline] = takeFirstTag(remainingXml, /<outline\b[^>]*?(?:\/>|>[\s\S]*?<\/outline>)/);
+  const [outlineTag, remainingAfterOutline] = takeFirstXmlTagByName(remainingXml, "outline");
   remainingXml = remainingAfterOutline;
-  const [shadowXml, remainingAfterShadow] = takeFirstTag(remainingXml, /<shadow\b[^>]*?(?:\/>|>[\s\S]*?<\/shadow>)/);
+  const [shadowTag, remainingAfterShadow] = takeFirstXmlTagByName(remainingXml, "shadow");
   remainingXml = remainingAfterShadow;
-  const [condenseXml, remainingAfterCondense] = takeFirstTag(remainingXml, /<condense\b[^>]*?(?:\/>|>[\s\S]*?<\/condense>)/);
+  const [condenseTag, remainingAfterCondense] = takeFirstXmlTagByName(remainingXml, "condense");
   remainingXml = remainingAfterCondense;
-  const [extendXml, remainingAfterExtend] = takeFirstTag(remainingXml, /<extend\b[^>]*?(?:\/>|>[\s\S]*?<\/extend>)/);
+  const [extendTag, remainingAfterExtend] = takeFirstXmlTagByName(remainingXml, "extend");
   remainingXml = remainingAfterExtend;
-  const [colorXml, remainingAfterColor] = takeFirstTag(remainingXml, /<color\b([^>]*?)(?:\/>|>[\s\S]*?<\/color>)/);
+  const [colorTag, remainingAfterColor] = takeFirstXmlTagByName(remainingXml, "color");
   remainingXml = remainingAfterColor;
-  const [sizeXml, remainingAfterSize] = takeFirstTag(remainingXml, /<sz\b([^>]*?)(?:\/>|>[\s\S]*?<\/sz>)/);
+  const [sizeTag, remainingAfterSize] = takeFirstXmlTagByName(remainingXml, "sz");
   remainingXml = remainingAfterSize;
-  const [nameXml, remainingAfterName] = takeFirstTag(remainingXml, /<name\b([^>]*?)(?:\/>|>[\s\S]*?<\/name>)/);
+  const [nameTag, remainingAfterName] = takeFirstXmlTagByName(remainingXml, "name");
   remainingXml = remainingAfterName;
-  const [familyXml, remainingAfterFamily] = takeFirstTag(remainingXml, /<family\b([^>]*?)(?:\/>|>[\s\S]*?<\/family>)/);
+  const [familyTag, remainingAfterFamily] = takeFirstXmlTagByName(remainingXml, "family");
   remainingXml = remainingAfterFamily;
-  const [charsetXml, remainingAfterCharset] = takeFirstTag(remainingXml, /<charset\b([^>]*?)(?:\/>|>[\s\S]*?<\/charset>)/);
+  const [charsetTag, remainingAfterCharset] = takeFirstXmlTagByName(remainingXml, "charset");
   remainingXml = remainingAfterCharset;
-  const [schemeXml, remainingAfterScheme] = takeFirstTag(remainingXml, /<scheme\b([^>]*?)(?:\/>|>[\s\S]*?<\/scheme>)/);
+  const [schemeTag, remainingAfterScheme] = takeFirstXmlTagByName(remainingXml, "scheme");
   remainingXml = remainingAfterScheme;
-  const [vertAlignXml, remainingAfterVertAlign] = takeFirstTag(
-    remainingXml,
-    /<vertAlign\b([^>]*?)(?:\/>|>[\s\S]*?<\/vertAlign>)/,
-  );
+  const [vertAlignTag, remainingAfterVertAlign] = takeFirstXmlTagByName(remainingXml, "vertAlign");
   remainingXml = remainingAfterVertAlign;
 
   return {
     definition: {
-      bold: boldXml ? true : null,
-      italic: italicXml ? true : null,
-      underline: parseUnderlineValue(underlineXml),
-      strike: strikeXml ? true : null,
-      outline: outlineXml ? true : null,
-      shadow: shadowXml ? true : null,
-      condense: condenseXml ? true : null,
-      extend: extendXml ? true : null,
-      size: parseTagValNumber(sizeXml),
-      name: parseTagValString(nameXml),
-      family: parseTagValNumber(familyXml),
-      charset: parseTagValNumber(charsetXml),
-      scheme: parseTagValString(schemeXml),
-      vertAlign: parseTagValString(vertAlignXml),
-      color: parseFontColorDefinition(colorXml),
+      bold: boldTag ? true : null,
+      italic: italicTag ? true : null,
+      underline: parseUnderlineValue(underlineTag?.source ?? null),
+      strike: strikeTag ? true : null,
+      outline: outlineTag ? true : null,
+      shadow: shadowTag ? true : null,
+      condense: condenseTag ? true : null,
+      extend: extendTag ? true : null,
+      size: parseTagValNumber(sizeTag?.source ?? null),
+      name: parseTagValString(nameTag?.source ?? null),
+      family: parseTagValNumber(familyTag?.source ?? null),
+      charset: parseTagValNumber(charsetTag?.source ?? null),
+      scheme: parseTagValString(schemeTag?.source ?? null),
+      vertAlign: parseTagValString(vertAlignTag?.source ?? null),
+      color: parseFontColorDefinition(colorTag?.source ?? null),
     },
     extraChildrenXml: /\S/.test(remainingXml) ? remainingXml : "",
   };
@@ -1157,12 +1126,8 @@ function parseFont(fontXml: string): ParsedFont {
 
 function parseCellStyle(attributesSource: string, innerXml: string): ParsedCellStyle {
   const attributes = parseAttributes(attributesSource);
-  const alignmentMatch = innerXml.match(/<alignment\b([^>]*?)(?:\/>|>[\s\S]*?<\/alignment>)/);
-  const alignmentAttributes = alignmentMatch ? parseAttributes(alignmentMatch[1]) : null;
-  const extraChildrenXml =
-    alignmentMatch && alignmentMatch.index !== undefined
-      ? innerXml.slice(0, alignmentMatch.index) + innerXml.slice(alignmentMatch.index + alignmentMatch[0].length)
-      : innerXml;
+  const [alignmentTag, extraChildrenXml] = takeFirstXmlTagByName(innerXml, "alignment");
+  const alignmentAttributes = alignmentTag ? parseAttributes(alignmentTag.attributesSource) : null;
 
   return {
     alignmentAttributes,
@@ -1859,13 +1824,13 @@ function findAttributeValue(attributes: Array<[string, string]>, name: string): 
   return attributes.find(([attributeName]) => attributeName === name)?.[1];
 }
 
-function takeFirstTag(xml: string, pattern: RegExp): [string | null, string] {
-  const match = xml.match(pattern);
-  if (!match || match.index === undefined) {
+function takeFirstXmlTagByName(xml: string, tagName: string): [XmlTag | null, string] {
+  const tag = findFirstXmlTag(xml, tagName);
+  if (!tag) {
     return [null, xml];
   }
 
-  return [match[0], xml.slice(0, match.index) + xml.slice(match.index + match[0].length)];
+  return [tag, xml.slice(0, tag.start) + xml.slice(tag.end)];
 }
 
 function parseTagValNumber(tagXml: string | null): number | null {
@@ -1958,8 +1923,8 @@ function parseBorderSideDefinition(tagXml: string | null): CellBorderSideDefinit
   }
 
   const style = getXmlAttr(tagXml, "style") ?? null;
-  const colorMatch = tagXml.match(/<color\b([^>]*?)(?:\/>|>[\s\S]*?<\/color>)/);
-  const color = parseBorderColorDefinition(colorMatch?.[0] ?? null);
+  const colorTag = findFirstXmlTag(tagXml, "color");
+  const color = parseBorderColorDefinition(colorTag?.source ?? null);
   return {
     style,
     color,

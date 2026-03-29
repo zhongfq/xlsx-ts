@@ -716,6 +716,46 @@ test("shared string cells decode numeric entities and ignore phonetic runs", asy
   assert.equal(sheet.getCell("A1"), "Hello\nWorld");
 });
 
+test("shared string parsing tolerates single-quoted rich-text and phonetic tags", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const encoder = new TextEncoder();
+  const entries = [
+    ...replaceEntryText(
+      replaceEntryText(
+        await loadFixtureEntries(fixtureDir),
+        "xl/worksheets/sheet1.xml",
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1" s="1" t="s"><v>0</v></c></row>
+  </sheetData>
+</worksheet>`,
+      ),
+      "xl/_rels/workbook.xml.rels",
+      `<?xml version='1.0' encoding='UTF-8' standalone='yes'?>
+<Relationships xmlns='http://schemas.openxmlformats.org/package/2006/relationships'>
+  <Relationship Id='rId1' Type='http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet' Target='worksheets/sheet1.xml'/>
+  <Relationship Id='rId2' Type='http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles' Target='styles.xml'/>
+  <Relationship Id='rId3' Type='http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings' Target='sharedStrings.xml'/>
+</Relationships>`,
+    ),
+    {
+      path: "xl/sharedStrings.xml",
+      data: encoder.encode(`<?xml version='1.0' encoding='UTF-8' standalone='yes'?>
+<sst xmlns='http://schemas.openxmlformats.org/spreadsheetml/2006/main' count='1' uniqueCount='1'>
+  <si>
+    <r><t xml:space='preserve'>Hel</t></r>
+    <rPh sb='0' eb='3'><t>X</t></rPh>
+    <r><t>lo&#10;World</t></r>
+  </si>
+</sst>`),
+    },
+  ].sort((left, right) => left.path.localeCompare(right.path));
+  const workbook = Workbook.fromEntries(entries);
+
+  assert.equal(workbook.getSheet("Sheet1").getCell("A1"), "Hello\nWorld");
+});
+
 test("cell handle objects cache parsed state and refresh after writes", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = await loadFixtureEntries(fixtureDir);

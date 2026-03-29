@@ -10,6 +10,28 @@
 
 这条底线一旦成立，样式、主题、批注、关系文件、未知扩展节点都能被天然保住。后续再往上叠加单元格、公式、批注、图片等 API，风险会低很多。
 
+## CLI 使用方式
+
+如果是已经发布到 npm 的包，应该通过 `npx` 调用，或者先安装再使用：
+
+```bash
+npx @codetypess/xlsx-ts inspect path/to/file.xlsx
+npx @codetypess/xlsx-ts get path/to/file.xlsx --sheet Sheet1 --cell B2
+```
+
+如果包已经安装到项目里，可以直接使用暴露出来的命令：
+
+```bash
+npm install @codetypess/xlsx-ts
+npx xlsx-ts inspect path/to/file.xlsx
+```
+
+只有在这个仓库内开发时，才继续使用本地脚本入口：
+
+```bash
+npm run cli -- inspect path/to/file.xlsx
+```
+
 ## 设计思路
 
 库分成两层：

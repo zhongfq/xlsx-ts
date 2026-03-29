@@ -1,6 +1,6 @@
 {
   "name": "@codetypess/xlsx-ts",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A lossless-first XLSX reader/writer prototype that preserves styles and untouched package parts.",
   "type": "module",
   "license": "MIT",

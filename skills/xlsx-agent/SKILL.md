@@ -1,15 +1,29 @@
 ---
 name: xlsx-agent
-description: Edit and validate `.xlsx` workbooks in this repository through the local `xlsx-ts` CLI. Use for config-table updates, structured-sheet edits, sheet management, style changes, and roundtrip-safe workbook modifications instead of touching workbook XML directly.
+description: Edit and validate `.xlsx` workbooks through the `xlsx-ts` CLI. Use for config-table updates, structured-sheet edits, sheet management, style changes, and roundtrip-safe workbook modifications instead of touching workbook XML directly.
 ---
 
 # Xlsx Agent
 
-Use the local CLI from the repository root:
+Use the CLI entry that matches the environment:
+
+```bash
+npx @codetypess/xlsx-ts <subcommand> ...
+```
+
+If the package is already installed in the current project:
+
+```bash
+npx xlsx-ts <subcommand> ...
+```
+
+For repository development from the repository root:
 
 ```bash
 npm run cli -- <subcommand> ...
 ```
+
+The examples below use `xlsx-ts` as shorthand. Replace it with `npx @codetypess/xlsx-ts`, `npx xlsx-ts`, or `npm run cli --` depending on the environment.
 
 ## Default Workflow
 
@@ -22,9 +36,9 @@ npm run cli -- <subcommand> ...
 Start with:
 
 ```bash
-npm run cli -- inspect path/to/file.xlsx
-npm run cli -- get path/to/file.xlsx --sheet Sheet1 --cell B2
-npm run cli -- validate path/to/file.xlsx
+xlsx-ts inspect path/to/file.xlsx
+xlsx-ts get path/to/file.xlsx --sheet Sheet1 --cell B2
+xlsx-ts validate path/to/file.xlsx
 ```
 
 Use `--in-place` only when the user clearly wants to overwrite the source file.
@@ -34,27 +48,27 @@ Use `--in-place` only when the user clearly wants to overwrite the source file.
 Use `set` for single-cell edits:
 
 ```bash
-npm run cli -- set path/to/file.xlsx --sheet Sheet1 --cell B2 --text "hello" --output out.xlsx
+xlsx-ts set path/to/file.xlsx --sheet Sheet1 --cell B2 --text "hello" --output out.xlsx
 ```
 
 Use `apply` for multi-step edits:
 
 ```bash
-npm run cli -- apply path/to/file.xlsx --ops /tmp/xlsx-agent-ops.json --output out.xlsx
+xlsx-ts apply path/to/file.xlsx --ops /tmp/xlsx-agent-ops.json --output out.xlsx
 ```
 
 Use `config-table` for simple header-based config sheets:
 
 ```bash
-npm run cli -- config-table list path/to/file.xlsx --sheet Config
-npm run cli -- config-table upsert path/to/file.xlsx --sheet Config --field Key --record '{"Key":"timeout","Value":"30"}' --in-place
+xlsx-ts config-table list path/to/file.xlsx --sheet Config
+xlsx-ts config-table upsert path/to/file.xlsx --sheet Config --field Key --record '{"Key":"timeout","Value":"30"}' --in-place
 ```
 
 Use `table` for structured sheets with header rows, metadata rows, and later data rows:
 
 ```bash
-npm run cli -- table inspect path/to/file.xlsx --sheet main --header-row 1 --data-start-row 6
-npm run cli -- table upsert path/to/file.xlsx --sheet main --header-row 1 --data-start-row 6 --key-field id --record '{"id":1001,"desc":"..."}' --in-place
+xlsx-ts table inspect path/to/file.xlsx --sheet main --header-row 1 --data-start-row 6
+xlsx-ts table upsert path/to/file.xlsx --sheet main --header-row 1 --data-start-row 6 --key-field id --record '{"id":1001,"desc":"..."}' --in-place
 ```
 
 Treat rows such as `auto`, `>>`, `!!!`, `###`, and `-` as structure to preserve, not built-in business semantics.
@@ -64,16 +78,16 @@ Treat rows such as `auto`, `>>`, `!!!`, `###`, and `-` as structure to preserve,
 If `table-profiles.json` already exists, prefer `--profile`:
 
 ```bash
-npm run cli -- table list res/task.xlsx --profile 'task#main'
-npm run cli -- table get res/task.xlsx --profile 'task#conf' --key '"GATE_SIEGE_TIME"'
-npm run cli -- table get res/task.xlsx --profile 'task#define' --key '{"key1":"TASK_TYPE","key2":"MAIN"}'
+xlsx-ts table list res/task.xlsx --profile 'task#main'
+xlsx-ts table get res/task.xlsx --profile 'task#conf' --key '"GATE_SIEGE_TIME"'
+xlsx-ts table get res/task.xlsx --profile 'task#define' --key '{"key1":"TASK_TYPE","key2":"MAIN"}'
 ```
 
 If profiles do not exist yet, generate them first:
 
 ```bash
-npm run cli -- table generate-profiles res/task.xlsx
-npm run cli -- table generate-profiles res/task.xlsx res/monster.xlsx --sheet-filter '^(main|conf)$' --output table-profiles.json
+xlsx-ts table generate-profiles res/task.xlsx
+xlsx-ts table generate-profiles res/task.xlsx res/monster.xlsx --sheet-filter '^(main|conf)$' --output table-profiles.json
 ```
 
 Generated names use `文件名#表名`, for example `task#main`.

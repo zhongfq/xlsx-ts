@@ -14,6 +14,28 @@ After that roundtrip, the extracted package parts should stay byte-for-byte iden
 Once that baseline holds, styles, themes, comments, relationship files, and unknown extension nodes are preserved naturally.
 Then higher-level APIs can be added on top with much lower risk.
 
+## CLI Usage
+
+For published npm usage, run the package through `npx` or install it first:
+
+```bash
+npx @codetypess/xlsx-ts inspect path/to/file.xlsx
+npx @codetypess/xlsx-ts get path/to/file.xlsx --sheet Sheet1 --cell B2
+```
+
+If the package is already installed in a project, use the exposed binary:
+
+```bash
+npm install @codetypess/xlsx-ts
+npx xlsx-ts inspect path/to/file.xlsx
+```
+
+For repository development only, keep using the local source runner:
+
+```bash
+npm run cli -- inspect path/to/file.xlsx
+```
+
 ## Design
 
 The library is split into two layers:

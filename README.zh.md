@@ -43,12 +43,7 @@ npm run cli -- inspect path/to/file.xlsx
 
 2. `Editable workbook layer`
    - 只针对确实需要改动的 XML 部件做局部 patch。
-   - 当前原型先支持：
-     - 读取工作表列表
-     - 读取单元格
-     - 修改单元格
-     - 读取公式
-     - 修改公式
+   - 当前实现已经覆盖 workbook 元数据、单元格值、公式、样式、行列编辑、记录式读写、表格、超链接、筛选、冻结窗格、选区、数据验证和 defined names。
    - 样式依赖的 `s="..."` 属性保留不动，因此样式不会因为写值被丢掉。
 
 ## 为什么这条路线适合“保样式”
@@ -358,22 +353,20 @@ await workbook.save("output.xlsx");
 
 ## 基准测试
 
-仓库内现在包含一份已脱敏的大型基准文件 [res/monster.xlsx](/Users/codetypes/Desktop/Github/xlsx-ts/res/monster.xlsx)，可直接用于性能回归对比。
+仓库内现在包含一份已脱敏的大型基准文件 [`res/monster.xlsx`](res/monster.xlsx)，可直接用于性能回归对比。
 
 常用命令：
 
 - `npm run bench:monster`
-  - 对 `res/monster.xlsx` 运行 3 轮对比基准，比较 `xlsx-ts` 和 `xlsx dense`
+  - 对 `res/monster.xlsx` 运行 3 轮基准
 - `npm run bench:check`
-  - 对 `res/monster.xlsx` 运行 5 轮对比，并校验 `benchmarks/monster-baseline.json` 里的正确性与性能阈值
-- `npm run bench:compare`
-  - 等价于运行仓库里的对比脚本
+  - 对 `res/monster.xlsx` 运行 5 轮基准，并校验 `benchmarks/monster-baseline.json` 里的非空单元格数量和耗时阈值
 - `node --import tsx scripts/benchmark.ts res/monster.xlsx 5`
   - 自定义文件路径和迭代次数
 - `node --import tsx scripts/benchmark.ts res/monster.xlsx 5 --check benchmarks/monster-baseline.json`
-  - 对任意基准文件执行回归检查；超出阈值时进程会以非零状态退出
+  - 对任意基准文件执行回归检查；数量或耗时超出阈值时进程会以非零状态退出
 
- ## 当前限制
+## 当前限制
 
 - zip 读写后端现在使用纯 JS 的 `fflate`，不再依赖系统里的 `python3` 与 `zip`
 - 当前仍会把整个 zip 包与各个 entry 一起放进内存，对超大文件的峰值内存还可以继续优化
@@ -386,23 +379,26 @@ await workbook.save("output.xlsx");
 ```bash
 npm run build
 npm test
+npm run pack:check
 npm run validate:task
 ```
 
 其中：
 
 - `npm test` 直接通过 `tsx` 运行 TypeScript 测试
+- `npm run pack:check` 会校验 `npm pack --dry-run` 的结果，确保 npm 包里只有当前源码对应的构建产物，不会夹带旧版本遗留文件
 - `npm run validate:task` 直接通过 `tsx` 运行 TypeScript 验证脚本
-- `npm run build` 只负责产出 `dist`
+- `npm run build` 会先清理 `dist`，再生成全新的构建产物
 
-测试里包含两件事：
+自动化校验目前覆盖：
 
-1. 无修改 roundtrip 后，包内各个 part 的内容逐字节一致
-2. 修改一个带样式的单元格后，样式索引仍被保留，`styles.xml` 不变
+1. 无修改 roundtrip 的稳定性，包括包内各个 part 的逐字节一致性
+2. 单元格、公式、样式、行列、表格、超链接、筛选、冻结窗格、选区、数据验证、defined names 和 CLI 命令等编辑路径
+3. 包元数据与 dry-run 打包校验，保证实际发布到 npm 的内容和当前源码树一致
 
 ## 真实文件验证
 
-仓库里的 [`res/task.xlsx`](/Users/codetypes/Desktop/Github/xlsx-ts/res/task.xlsx) 可以作为后续回归验证样本。
+仓库里的 [`res/task.xlsx`](res/task.xlsx) 可以作为后续回归验证样本。
 
 ```bash
 npm run validate:task

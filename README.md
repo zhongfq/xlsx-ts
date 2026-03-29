@@ -47,12 +47,7 @@ The library is split into two layers:
 
 2. `Editable workbook layer`
    - Apply targeted XML patches only to the parts that actually need to change.
-   - The current prototype supports:
-     - reading sheet lists
-     - reading cells
-     - writing cells
-     - reading formulas
-     - writing formulas
+   - The current implementation already covers workbook metadata, cell values, formulas, styles, row and column edits, structured record helpers, tables, hyperlinks, filters, frozen panes, selections, data validation, and defined names.
    - Style-related `s="..."` attributes are preserved, so styles are not lost when values change.
 
 ## Why This Works For Style Preservation
@@ -363,20 +358,18 @@ Notes:
 
 ## Benchmarking
 
-The repo now includes a sanitized large benchmark workbook at [res/monster.xlsx](/Users/codetypes/Desktop/Github/xlsx-ts/res/monster.xlsx), intended for repeatable performance regression checks.
+The repo now includes a sanitized large benchmark workbook at [`res/monster.xlsx`](res/monster.xlsx), intended for repeatable performance regression checks.
 
 Common commands:
 
 - `npm run bench:monster`
-  - Run a 3-iteration comparison on `res/monster.xlsx` against `xlsx-ts` and `xlsx dense`
+  - Run a 3-iteration benchmark on `res/monster.xlsx`
 - `npm run bench:check`
-  - Run a 5-iteration comparison on `res/monster.xlsx` and validate correctness plus performance thresholds from `benchmarks/monster-baseline.json`
-- `npm run bench:compare`
-  - Equivalent wrapper around the compare script kept in the repo
+  - Run a 5-iteration benchmark on `res/monster.xlsx` and validate the non-null count plus time threshold from `benchmarks/monster-baseline.json`
 - `node --import tsx scripts/benchmark.ts res/monster.xlsx 5`
   - Run the benchmark with a custom file path and iteration count
 - `node --import tsx scripts/benchmark.ts res/monster.xlsx 5 --check benchmarks/monster-baseline.json`
-  - Run the regression check against any benchmark file; the process exits non-zero when the thresholds are exceeded
+  - Run the regression check against any benchmark file; the process exits non-zero when the workbook count or timing threshold is exceeded
 
 ## Current Limits
 
@@ -391,23 +384,26 @@ Common commands:
 ```bash
 npm run build
 npm test
+npm run pack:check
 npm run validate:task
 ```
 
 Where:
 
 - `npm test` runs the TypeScript tests through `tsx`
+- `npm run pack:check` verifies that `npm pack --dry-run` contains exactly the expected build outputs and no stale files from older builds
 - `npm run validate:task` runs the TypeScript validation script through `tsx`
-- `npm run build` only produces `dist`
+- `npm run build` cleans `dist` first, then produces a fresh build
 
-The test suite currently checks two things:
+The automated checks currently cover:
 
-1. After an untouched roundtrip, every package part remains byte-for-byte identical.
-2. After editing a styled cell, the style index is still preserved and `styles.xml` stays unchanged.
+1. Untouched roundtrip stability, including byte-for-byte part preservation.
+2. Workbook editing flows across cells, formulas, styles, rows, columns, tables, hyperlinks, filters, frozen panes, selections, data validations, defined names, and CLI commands.
+3. Package metadata plus dry-run tarball validation, so the published npm package stays aligned with the current source tree.
 
 ## Real File Validation
 
-[`res/task.xlsx`](/Users/codetypes/Desktop/Github/xlsx-ts/res/task.xlsx) in the repository is a useful regression sample.
+[`res/task.xlsx`](res/task.xlsx) in the repository is a useful regression sample.
 
 ```bash
 npm run validate:task

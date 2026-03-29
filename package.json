@@ -33,22 +33,22 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "clean": "node scripts/clean-dist.mjs",
+    "build": "npm run clean && tsc -p tsconfig.json",
     "cli": "node --import tsx src/cli.ts",
+    "pack:check": "node scripts/check-pack.mjs",
     "test": "node --import tsx --test test/**/*.test.ts",
-    "prepublishOnly": "npm run build && npm test",
+    "prepublishOnly": "npm run build && npm test && npm run pack:check",
     "release": "npm publish --access public",
     "bench:monster": "node --import tsx scripts/benchmark.ts res/monster.xlsx",
     "bench:check": "node --import tsx scripts/benchmark.ts res/monster.xlsx 5 --check benchmarks/monster-baseline.json",
-    "bench:compare": "node --import tsx test/compare-test.ts",
     "validate:roundtrip": "node --import tsx scripts/validate-roundtrip.ts",
     "validate:task": "npm run validate:roundtrip -- res/task.xlsx"
   },
   "devDependencies": {
     "@types/node": "^25.5.0",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3",
-    "xlsx": "^0.18.5"
+    "typescript": "^5.9.3"
   },
   "dependencies": {
     "commander": "^14.0.3",

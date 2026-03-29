@@ -1,6 +1,4 @@
 {
   "expectedNonNull": 581708,
-  "maxAbsoluteGapMs": 180,
-  "maxRatioVsDense": 1.25,
-  "maxXlsxTsAverageMs": 900
+  "maxAverageMs": 900
 }

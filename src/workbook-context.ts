@@ -1,6 +1,6 @@
 import { Sheet } from "./sheet.js";
 import type { Workbook } from "./workbook.js";
-import { basenamePosix, dirnamePosix, resolvePosix } from "./utils/path.js";
+import { basenamePosix, dirnamePosix, resolveRelationshipTarget } from "./utils/path.js";
 import { findXmlTags, getTagAttr } from "./utils/xml-read.js";
 
 export interface WorkbookContext {
@@ -53,7 +53,7 @@ function parseRelationships(xml: string, baseDir: string): Map<string, string> {
       continue;
     }
 
-    relationships.set(id, resolvePosix(baseDir, target.replace(/^\/+/, "")));
+    relationships.set(id, resolveRelationshipTarget(baseDir, target));
   }
 
   return relationships;
@@ -108,7 +108,7 @@ function findRelationshipTarget(
       continue;
     }
 
-    return baseDir ? resolvePosix(baseDir, target.replace(/^\/+/, "")) : target;
+    return baseDir ? resolveRelationshipTarget(baseDir, target) : target.replace(/^\/+/, "");
   }
 
   return undefined;

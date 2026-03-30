@@ -81,3 +81,139 @@ test("monster.xlsx opens with stable workbook metadata and roundtrips cleanly", 
   assert.equal(result.entries, 51);
   assert.deepEqual(result.diffs, []);
 });
+
+test("openpyxl sample opens with stable workbook structure and roundtrips cleanly", async () => {
+  const workbook = await Workbook.open(resolve("res/producers/openpyxl-sample.xlsx"));
+  const dataSheet = workbook.getSheet("Data");
+
+  assert.equal(workbook.listEntries().length, 11);
+  assert.deepEqual(
+    workbook.getSheets().map((sheet) => sheet.name),
+    ["Data", "Links"],
+  );
+  assert.deepEqual(workbook.getDefinedNames(), [
+    {
+      hidden: false,
+      name: "Scores",
+      scope: null,
+      value: "Data!$A$1:$C$3",
+    },
+    {
+      hidden: true,
+      name: "_xlnm._FilterDatabase",
+      scope: "Data",
+      value: "'Data'!$A$1:$C$3",
+    },
+  ]);
+  assert.equal(dataSheet.getUsedRange(), "A1:D3");
+  assert.equal(dataSheet.getAutoFilter(), "A1:C3");
+  assert.deepEqual(dataSheet.getFreezePane(), {
+    columnCount: 1,
+    rowCount: 1,
+    topLeftCell: "B2",
+    activePane: "bottomRight",
+  });
+  assert.deepEqual(dataSheet.getMergedRanges(), ["D1:E1"]);
+  assert.equal(dataSheet.getFormula("C2"), "B2*2");
+  assert.equal(dataSheet.getFormula("C3"), "B3*2");
+  assert.deepEqual(dataSheet.getDataValidations(), [
+    {
+      allowBlank: true,
+      error: null,
+      errorStyle: null,
+      errorTitle: null,
+      formula1: "0",
+      formula2: "100",
+      imeMode: null,
+      operator: "between",
+      prompt: null,
+      promptTitle: null,
+      range: "B2:B3",
+      showDropDown: false,
+      showErrorMessage: false,
+      showInputMessage: false,
+      type: "whole",
+    },
+  ]);
+  assert.deepEqual(dataSheet.getHyperlinks(), [
+    {
+      address: "A2",
+      target: "#Links!A1",
+      tooltip: null,
+      type: "external",
+    },
+  ]);
+
+  const result = await validateRoundtripFile(resolve("res/producers/openpyxl-sample.xlsx"));
+  assert.equal(result.ok, true);
+  assert.equal(result.entries, 11);
+  assert.deepEqual(result.diffs, []);
+});
+
+test("xlsxwriter sample opens with stable workbook structure and roundtrips cleanly", async () => {
+  const workbook = await Workbook.open(resolve("res/producers/xlsxwriter-sample.xlsx"));
+  const dataSheet = workbook.getSheet("Data");
+
+  assert.equal(workbook.listEntries().length, 11);
+  assert.deepEqual(
+    workbook.getSheets().map((sheet) => sheet.name),
+    ["Data", "Links"],
+  );
+  assert.deepEqual(workbook.getDefinedNames(), [
+    {
+      hidden: true,
+      name: "_xlnm._FilterDatabase",
+      scope: "Data",
+      value: "Data!$A$1:$C$3",
+    },
+    {
+      hidden: false,
+      name: "Scores",
+      scope: null,
+      value: "Data!$A$1:$C$3",
+    },
+  ]);
+  assert.equal(dataSheet.getUsedRange(), "A1:E3");
+  assert.equal(dataSheet.getAutoFilter(), "A1:C3");
+  assert.deepEqual(dataSheet.getFreezePane(), {
+    columnCount: 1,
+    rowCount: 1,
+    topLeftCell: "B2",
+    activePane: "bottomRight",
+  });
+  assert.deepEqual(dataSheet.getMergedRanges(), ["D1:E1"]);
+  assert.equal(dataSheet.getFormula("C2"), "B2*2");
+  assert.equal(dataSheet.getFormula("C3"), "B3*2");
+  assert.deepEqual(dataSheet.getDataValidations(), [
+    {
+      allowBlank: true,
+      error: null,
+      errorStyle: null,
+      errorTitle: null,
+      formula1: "0",
+      formula2: "100",
+      imeMode: null,
+      operator: null,
+      prompt: null,
+      promptTitle: null,
+      range: "B2:B3",
+      showDropDown: null,
+      showErrorMessage: true,
+      showInputMessage: true,
+      type: "whole",
+    },
+  ]);
+  assert.deepEqual(dataSheet.getHyperlinks(), [
+    {
+      address: "A2",
+      target: "Links!A1",
+      tooltip: null,
+      type: "internal",
+    },
+  ]);
+
+  const result = await validateRoundtripFile(resolve("res/producers/xlsxwriter-sample.xlsx"));
+  assert.equal(result.ok, true);
+  assert.equal(result.entries, 11);
+  assert.deepEqual(result.diffs, []);
+});

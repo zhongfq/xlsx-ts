@@ -26,3 +26,8 @@ export function resolvePosix(baseDir: string, target: string): string {
 
   return stack.join("/");
 }
+
+export function resolveRelationshipTarget(baseDir: string, target: string): string {
+  const normalizedTarget = target.replace(/^\/+/, "");
+  return target.startsWith("/") ? normalizedTarget : resolvePosix(baseDir, normalizedTarget);
+}

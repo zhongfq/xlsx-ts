@@ -32,7 +32,7 @@ import {
   type SheetIndex,
 } from "./sheet-index.js";
 import type { Workbook } from "./workbook.js";
-import { basenamePosix, dirnamePosix, resolvePosix } from "./utils/path.js";
+import { basenamePosix, dirnamePosix, resolvePosix, resolveRelationshipTarget } from "./utils/path.js";
 import { findFirstXmlTag, findXmlTags, getTagAttr, type XmlTag } from "./utils/xml-read.js";
 import {
   decodeXmlText,
@@ -1494,7 +1494,7 @@ export class Sheet {
 
       tables.push({
         relationshipId,
-        path: resolvePosix(baseDir, target.replace(/^\/+/, "")),
+        path: resolveRelationshipTarget(baseDir, target),
       });
     }
 

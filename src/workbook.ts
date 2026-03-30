@@ -124,21 +124,26 @@ export class Workbook {
   private sharedStringsCache?: string[];
   private stylesCache?: StylesCache | null;
 
-  constructor(entries: Iterable<ArchiveEntry>, adapter = new Zip()) {
+  constructor(
+    entries: Iterable<ArchiveEntry>,
+    adapter = new Zip(),
+    options: { cloneEntryData?: boolean } = {},
+  ) {
     this.adapter = adapter;
     this.entries = new Map();
     this.entryOrder = [];
+    const cloneEntryData = options.cloneEntryData ?? true;
 
     for (const entry of entries) {
       this.entryOrder.push(entry.path);
-      this.entries.set(entry.path, new Uint8Array(entry.data));
+      this.entries.set(entry.path, cloneEntryData ? new Uint8Array(entry.data) : entry.data);
     }
   }
 
   static async open(filePath: string): Promise<Workbook> {
     const adapter = new Zip();
     const entries = await adapter.readArchive(filePath);
-    return new Workbook(entries, adapter);
+    return new Workbook(entries, adapter, { cloneEntryData: false });
   }
 
   static fromEntries(entries: Iterable<ArchiveEntry>): Workbook {
@@ -728,7 +733,7 @@ export class Workbook {
   }
 
   async save(filePath: string): Promise<void> {
-    await this.adapter.writeArchive(filePath, this.toEntries());
+    await this.adapter.writeArchive(filePath, this.getEntriesView());
   }
 
   toEntries(): ArchiveEntry[] {
@@ -740,6 +745,17 @@ export class Workbook {
 
       return { path, data: new Uint8Array(data) };
     });
+  }
+
+  private *getEntriesView(): Iterable<ArchiveEntry> {
+    for (const path of this.entryOrder) {
+      const data = this.entries.get(path);
+      if (!data) {
+        throw new XlsxError(`Entry missing from map: ${path}`);
+      }
+
+      yield { path, data };
+    }
   }
 
   private getWorkbookContext(): WorkbookContext {

@@ -18,16 +18,18 @@ export class Zip {
       }));
   }
 
-  async writeArchive(filePath: string, entries: ArchiveEntry[]): Promise<void> {
+  async writeArchive(filePath: string, entries: Iterable<ArchiveEntry>): Promise<void> {
     const destinationDirectory = dirname(filePath);
     if (destinationDirectory !== ".") {
       await mkdir(destinationDirectory, { recursive: true });
     }
 
-    const zipped = zipSync(
-      Object.fromEntries(entries.map((entry) => [entry.path, new Uint8Array(entry.data)])),
-      { level: 6 },
-    );
+    const sources: Record<string, Uint8Array> = {};
+    for (const entry of entries) {
+      sources[entry.path] = entry.data;
+    }
+
+    const zipped = zipSync(sources, { level: 6 });
     await writeFile(filePath, zipped);
   }
 

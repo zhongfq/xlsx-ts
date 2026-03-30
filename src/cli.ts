@@ -34,11 +34,17 @@ import {
 } from "./cli-json.js";
 import type { CellRecord, Writer } from "./cli-json.js";
 import {
+  generateTableProfiles,
+  getConfigTableRecord,
+  getConfigTableRows,
+  getStructuredTableRecord,
+  getStructuredTableRows,
   findConfigTableRow,
   findStructuredTableRow,
   getTableHeaders,
   inferProfileName,
   inferTableProfile,
+  inspectTable,
   listConfigTableRows,
   listStructuredTableRows,
   parseTableKey,
@@ -46,11 +52,12 @@ import {
   readConfigTableSyncInput,
   readTableProfiles,
   resolveConfigTableHeaders,
+  resolveTableCommandContext,
   resolveTableKeyFields,
   writeStructuredTableRecord,
   writeStructuredTableRecords,
 } from "./cli-table.js";
-import type { ConfigTableRow, StructuredTableRow, TableProfile } from "./cli-table.js";
+import type { ConfigTableRow, StructuredTableRow, TableCommandContext } from "./cli-table.js";
 import { validateRoundtripFile } from "./roundtrip.js";
 import { Workbook } from "./workbook.js";
 
@@ -650,7 +657,7 @@ function createProgram(io: Required<CliIo>): Command {
           sheet?: string;
         },
       ) => {
-        const context = await resolveTableCommandContext(io.cwd, options);
+        const context = await resolveCliTableCommandContext(io.cwd, options);
         const result = await inspectTable(
           resolveFrom(io.cwd, file),
           context.sheet,
@@ -680,7 +687,7 @@ function createProgram(io: Required<CliIo>): Command {
           sheet?: string;
         },
       ) => {
-        const context = await resolveTableCommandContext(io.cwd, options);
+        const context = await resolveCliTableCommandContext(io.cwd, options);
         const result = await getStructuredTableRows(
           resolveFrom(io.cwd, file),
           context.sheet,
@@ -714,7 +721,7 @@ function createProgram(io: Required<CliIo>): Command {
           sheet?: string;
         },
       ) => {
-        const context = await resolveTableCommandContext(io.cwd, options);
+        const context = await resolveCliTableCommandContext(io.cwd, options);
         const result = await getStructuredTableRecord(
           resolveFrom(io.cwd, file),
           context.sheet,
@@ -754,7 +761,7 @@ function createProgram(io: Required<CliIo>): Command {
           sheet?: string;
         },
       ) => {
-        const context = await resolveTableCommandContext(io.cwd, options);
+        const context = await resolveCliTableCommandContext(io.cwd, options);
         const inputPath = resolveFrom(io.cwd, file);
         const outputPath = resolveOutputPath(inputPath, {
           inPlace: options.inPlace === true,
@@ -816,7 +823,7 @@ function createProgram(io: Required<CliIo>): Command {
           sheet?: string;
         },
       ) => {
-        const context = await resolveTableCommandContext(io.cwd, options);
+        const context = await resolveCliTableCommandContext(io.cwd, options);
         const inputPath = resolveFrom(io.cwd, file);
         const outputPath = resolveOutputPath(inputPath, {
           inPlace: options.inPlace === true,
@@ -883,7 +890,7 @@ function createProgram(io: Required<CliIo>): Command {
           valueField: string;
         },
       ) => {
-        const context = await resolveTableCommandContext(io.cwd, options);
+        const context = await resolveCliTableCommandContext(io.cwd, options);
         const inputPath = resolveFrom(io.cwd, file);
         const jsonPath = resolveFrom(io.cwd, options.fromJson);
         const outputPath = resolveOutputPath(inputPath, {
@@ -1559,236 +1566,6 @@ async function getRecord(
   return workbook.getSheet(sheetName).getRecord(row, headerRow);
 }
 
-async function getConfigTableRows(
-  filePath: string,
-  sheetName: string,
-  headerRow: number,
-): Promise<{
-  file: string;
-  headerRow: number;
-  rows: ConfigTableRow[];
-  sheet: string;
-}> {
-  const workbook = await Workbook.open(filePath);
-  const sheet = workbook.getSheet(sheetName);
-  return {
-    file: filePath,
-    headerRow,
-    rows: listConfigTableRows(sheet, headerRow),
-    sheet: sheetName,
-  };
-}
-
-async function getConfigTableRecord(
-  filePath: string,
-  sheetName: string,
-  headerRow: number,
-  field: string,
-  value: CellValue,
-): Promise<{
-  field: string;
-  file: string;
-  headerRow: number;
-  record: ConfigTableRow | null;
-  sheet: string;
-  value: CellValue;
-}> {
-  const workbook = await Workbook.open(filePath);
-  const sheet = workbook.getSheet(sheetName);
-  return {
-    field,
-    file: filePath,
-    headerRow,
-    record: findConfigTableRow(sheet, headerRow, field, value) ?? null,
-    sheet: sheetName,
-    value,
-  };
-}
-
-async function inspectTable(
-  filePath: string,
-  sheetName: string,
-  headerRow: number,
-  dataStartRow: number,
-): Promise<{
-  dataRowCount: number;
-  dataRowsPreview: StructuredTableRow[];
-  dataStartRow: number;
-  file: string;
-  headerRow: number;
-  headers: string[];
-  metadataRows: Array<{ row: number; values: CellValue[] }>;
-  sheet: string;
-}> {
-  const workbook = await Workbook.open(filePath);
-  const sheet = workbook.getSheet(sheetName);
-  const rows = listStructuredTableRows(sheet, headerRow, dataStartRow);
-  const metadataRows: Array<{ row: number; values: CellValue[] }> = [];
-
-  for (let row = headerRow + 1; row < dataStartRow; row += 1) {
-    metadataRows.push({
-      row,
-      values: sheet.getRow(row),
-    });
-  }
-
-  return {
-    dataRowCount: rows.length,
-    dataRowsPreview: rows.slice(0, 5),
-    dataStartRow,
-    file: filePath,
-    headerRow,
-    headers: getTableHeaders(sheet, headerRow),
-    metadataRows,
-    sheet: sheetName,
-  };
-}
-
-async function getStructuredTableRows(
-  filePath: string,
-  sheetName: string,
-  headerRow: number,
-  dataStartRow: number,
-): Promise<{
-  dataStartRow: number;
-  file: string;
-  headerRow: number;
-  rows: StructuredTableRow[];
-  sheet: string;
-}> {
-  const workbook = await Workbook.open(filePath);
-  const sheet = workbook.getSheet(sheetName);
-  return {
-    dataStartRow,
-    file: filePath,
-    headerRow,
-    rows: listStructuredTableRows(sheet, headerRow, dataStartRow),
-    sheet: sheetName,
-  };
-}
-
-async function getStructuredTableRecord(
-  filePath: string,
-  sheetName: string,
-  headerRow: number,
-  dataStartRow: number,
-  explicitKeyFields: string[],
-  keySource: string,
-): Promise<{
-  dataStartRow: number;
-  file: string;
-  headerRow: number;
-  key: CellRecord;
-  keyFields: string[];
-  row: StructuredTableRow | null;
-  sheet: string;
-}> {
-  const workbook = await Workbook.open(filePath);
-  const sheet = workbook.getSheet(sheetName);
-  const keyFields = resolveTableKeyFields(sheet, headerRow, explicitKeyFields);
-  const key = parseTableKey(keySource, keyFields, "--key");
-
-  return {
-    dataStartRow,
-    file: filePath,
-    headerRow,
-    key,
-    keyFields,
-    row: findStructuredTableRow(sheet, headerRow, dataStartRow, keyFields, key) ?? null,
-    sheet: sheetName,
-  };
-}
-
-async function generateTableProfiles(
-  filePaths: string[],
-  options: {
-    sheetFilter?: RegExp;
-  } = {},
-): Promise<{
-  files: string[];
-  profileNames: string[];
-  profiles: Record<string, TableProfile>;
-}> {
-  const profiles: Record<string, TableProfile> = {};
-  const files: string[] = [];
-
-  for (const filePath of filePaths) {
-    const workbook = await Workbook.open(filePath);
-    files.push(filePath);
-
-    const sheets =
-      options.sheetFilter === undefined
-        ? workbook.getSheets()
-        : workbook.getSheets().filter((sheet) => options.sheetFilter!.test(sheet.name));
-
-    for (const sheet of sheets) {
-      const profileName = inferProfileName(filePath, sheet.name);
-      if (Object.hasOwn(profiles, profileName)) {
-        throw new Error(`Duplicate generated profile name: ${profileName}`);
-      }
-
-      profiles[profileName] = inferTableProfile(sheet);
-    }
-  }
-
-  return {
-    files,
-    profileNames: Object.keys(profiles),
-    profiles,
-  };
-}
-
-async function resolveTableCommandContext(
-  cwd: string,
-  options: {
-    dataStartRow?: number;
-    headerRow?: number;
-    keyField?: string[];
-    profile?: string;
-    profilesFile?: string;
-    sheet?: string;
-  },
-): Promise<{
-  dataStartRow: number;
-  headerRow: number;
-  keyFields: string[];
-  sheet: string;
-}> {
-  let profile: TableProfile | undefined;
-
-  if (options.profile) {
-    const profilesPath = resolveFrom(cwd, options.profilesFile ?? "table-profiles.json");
-    const profiles = await readTableProfiles(profilesPath);
-    profile = profiles[options.profile];
-    if (!profile) {
-      throw new Error(`Table profile not found: ${options.profile}`);
-    }
-  }
-
-  const sheet = options.sheet ?? profile?.sheet;
-  const headerRow = options.headerRow ?? profile?.headerRow;
-  const dataStartRow = options.dataStartRow ?? profile?.dataStartRow;
-
-  if (!sheet) {
-    throw new Error("Missing sheet; pass --sheet or use --profile");
-  }
-
-  if (headerRow === undefined) {
-    throw new Error("Missing header row; pass --header-row or use --profile");
-  }
-
-  if (dataStartRow === undefined) {
-    throw new Error("Missing data start row; pass --data-start-row or use --profile");
-  }
-
-  return {
-    dataStartRow,
-    headerRow,
-    keyFields: options.keyField?.length ? options.keyField : (profile?.keyFields ?? []),
-    sheet,
-  };
-}
-
 async function readOpsDocument(filePath: string): Promise<OpsDocument> {
   const parsed = parseJsonDocument(await readFile(filePath, "utf8"), filePath);
 
@@ -2095,6 +1872,23 @@ function collectRepeatedStrings(value: string, previous: string[] = []): string[
 
 function resolveFrom(cwd: string, targetPath: string): string {
   return resolve(cwd, targetPath);
+}
+
+async function resolveCliTableCommandContext(
+  cwd: string,
+  options: {
+    dataStartRow?: number;
+    headerRow?: number;
+    keyField?: string[];
+    profile?: string;
+    profilesFile?: string;
+    sheet?: string;
+  },
+): Promise<TableCommandContext> {
+  return resolveTableCommandContext(
+    options,
+    options.profile ? resolveFrom(cwd, options.profilesFile ?? "table-profiles.json") : undefined,
+  );
 }
 
 async function main(): Promise<void> {

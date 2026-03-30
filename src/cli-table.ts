@@ -11,7 +11,7 @@ import {
 } from "./cli-json.js";
 import type { CellRecord } from "./cli-json.js";
 import type { CellValue } from "./types.js";
-import type { Workbook } from "./workbook.js";
+import { Workbook } from "./workbook.js";
 
 export type CliSheet = ReturnType<Workbook["getSheet"]>;
 
@@ -29,6 +29,13 @@ export interface TableProfile {
   dataStartRow: number;
   headerRow: number;
   keyFields?: string[];
+  sheet: string;
+}
+
+export interface TableCommandContext {
+  dataStartRow: number;
+  headerRow: number;
+  keyFields: string[];
   sheet: string;
 }
 
@@ -79,6 +86,233 @@ export async function readTableProfiles(filePath: string): Promise<Record<string
   }
 
   return next;
+}
+
+export async function getConfigTableRows(
+  filePath: string,
+  sheetName: string,
+  headerRow: number,
+): Promise<{
+  file: string;
+  headerRow: number;
+  rows: ConfigTableRow[];
+  sheet: string;
+}> {
+  const workbook = await Workbook.open(filePath);
+  const sheet = workbook.getSheet(sheetName);
+  return {
+    file: filePath,
+    headerRow,
+    rows: listConfigTableRows(sheet, headerRow),
+    sheet: sheetName,
+  };
+}
+
+export async function getConfigTableRecord(
+  filePath: string,
+  sheetName: string,
+  headerRow: number,
+  field: string,
+  value: CellValue,
+): Promise<{
+  field: string;
+  file: string;
+  headerRow: number;
+  record: ConfigTableRow | null;
+  sheet: string;
+  value: CellValue;
+}> {
+  const workbook = await Workbook.open(filePath);
+  const sheet = workbook.getSheet(sheetName);
+  return {
+    field,
+    file: filePath,
+    headerRow,
+    record: findConfigTableRow(sheet, headerRow, field, value) ?? null,
+    sheet: sheetName,
+    value,
+  };
+}
+
+export async function inspectTable(
+  filePath: string,
+  sheetName: string,
+  headerRow: number,
+  dataStartRow: number,
+): Promise<{
+  dataRowCount: number;
+  dataRowsPreview: StructuredTableRow[];
+  dataStartRow: number;
+  file: string;
+  headerRow: number;
+  headers: string[];
+  metadataRows: Array<{ row: number; values: CellValue[] }>;
+  sheet: string;
+}> {
+  const workbook = await Workbook.open(filePath);
+  const sheet = workbook.getSheet(sheetName);
+  const rows = listStructuredTableRows(sheet, headerRow, dataStartRow);
+  const metadataRows: Array<{ row: number; values: CellValue[] }> = [];
+
+  for (let row = headerRow + 1; row < dataStartRow; row += 1) {
+    metadataRows.push({
+      row,
+      values: sheet.getRow(row),
+    });
+  }
+
+  return {
+    dataRowCount: rows.length,
+    dataRowsPreview: rows.slice(0, 5),
+    dataStartRow,
+    file: filePath,
+    headerRow,
+    headers: getTableHeaders(sheet, headerRow),
+    metadataRows,
+    sheet: sheetName,
+  };
+}
+
+export async function getStructuredTableRows(
+  filePath: string,
+  sheetName: string,
+  headerRow: number,
+  dataStartRow: number,
+): Promise<{
+  dataStartRow: number;
+  file: string;
+  headerRow: number;
+  rows: StructuredTableRow[];
+  sheet: string;
+}> {
+  const workbook = await Workbook.open(filePath);
+  const sheet = workbook.getSheet(sheetName);
+  return {
+    dataStartRow,
+    file: filePath,
+    headerRow,
+    rows: listStructuredTableRows(sheet, headerRow, dataStartRow),
+    sheet: sheetName,
+  };
+}
+
+export async function getStructuredTableRecord(
+  filePath: string,
+  sheetName: string,
+  headerRow: number,
+  dataStartRow: number,
+  explicitKeyFields: string[],
+  keySource: string,
+): Promise<{
+  dataStartRow: number;
+  file: string;
+  headerRow: number;
+  key: CellRecord;
+  keyFields: string[];
+  row: StructuredTableRow | null;
+  sheet: string;
+}> {
+  const workbook = await Workbook.open(filePath);
+  const sheet = workbook.getSheet(sheetName);
+  const keyFields = resolveTableKeyFields(sheet, headerRow, explicitKeyFields);
+  const key = parseTableKey(keySource, keyFields, "--key");
+
+  return {
+    dataStartRow,
+    file: filePath,
+    headerRow,
+    key,
+    keyFields,
+    row: findStructuredTableRow(sheet, headerRow, dataStartRow, keyFields, key) ?? null,
+    sheet: sheetName,
+  };
+}
+
+export async function generateTableProfiles(
+  filePaths: string[],
+  options: {
+    sheetFilter?: RegExp;
+  } = {},
+): Promise<{
+  files: string[];
+  profileNames: string[];
+  profiles: Record<string, TableProfile>;
+}> {
+  const profiles: Record<string, TableProfile> = {};
+  const files: string[] = [];
+
+  for (const filePath of filePaths) {
+    const workbook = await Workbook.open(filePath);
+    files.push(filePath);
+
+    const sheets =
+      options.sheetFilter === undefined
+        ? workbook.getSheets()
+        : workbook.getSheets().filter((sheet) => options.sheetFilter!.test(sheet.name));
+
+    for (const sheet of sheets) {
+      const profileName = inferProfileName(filePath, sheet.name);
+      if (Object.hasOwn(profiles, profileName)) {
+        throw new Error(`Duplicate generated profile name: ${profileName}`);
+      }
+
+      profiles[profileName] = inferTableProfile(sheet);
+    }
+  }
+
+  return {
+    files,
+    profileNames: Object.keys(profiles),
+    profiles,
+  };
+}
+
+export async function resolveTableCommandContext(
+  options: {
+    dataStartRow?: number;
+    headerRow?: number;
+    keyField?: string[];
+    profile?: string;
+    sheet?: string;
+  },
+  profilesPath?: string,
+): Promise<TableCommandContext> {
+  let profile: TableProfile | undefined;
+
+  if (options.profile) {
+    if (!profilesPath) {
+      throw new Error("Missing table profiles path");
+    }
+
+    const profiles = await readTableProfiles(profilesPath);
+    profile = profiles[options.profile];
+    if (!profile) {
+      throw new Error(`Table profile not found: ${options.profile}`);
+    }
+  }
+
+  const sheet = options.sheet ?? profile?.sheet;
+  const headerRow = options.headerRow ?? profile?.headerRow;
+  const dataStartRow = options.dataStartRow ?? profile?.dataStartRow;
+
+  if (!sheet) {
+    throw new Error("Missing sheet; pass --sheet or use --profile");
+  }
+
+  if (headerRow === undefined) {
+    throw new Error("Missing header row; pass --header-row or use --profile");
+  }
+
+  if (dataStartRow === undefined) {
+    throw new Error("Missing data start row; pass --data-start-row or use --profile");
+  }
+
+  return {
+    dataStartRow,
+    headerRow,
+    keyFields: options.keyField?.length ? options.keyField : (profile?.keyFields ?? []),
+    sheet,
+  };
 }
 
 export function getTableHeaders(sheet: CliSheet, headerRow: number): string[] {
@@ -436,7 +670,6 @@ function looksLikeTypeDescriptor(value: string): boolean {
     normalized === "float" ||
     normalized === "number" ||
     normalized === "table" ||
-    normalized === "items" ||
     normalized === "json" ||
     normalized === "int?" ||
     normalized === "string?" ||
@@ -444,7 +677,6 @@ function looksLikeTypeDescriptor(value: string): boolean {
     normalized === "float?" ||
     normalized === "number?" ||
     normalized === "table?" ||
-    normalized === "items?" ||
     normalized === "json?" ||
     normalized === "int[]" ||
     normalized === "string[]" ||
@@ -452,7 +684,6 @@ function looksLikeTypeDescriptor(value: string): boolean {
     normalized === "float[]" ||
     normalized === "number[]" ||
     normalized === "table[]" ||
-    normalized === "items[]" ||
     normalized === "json[]" ||
     /^@[a-zA-Z_][a-zA-Z0-9_]*$/.test(normalized)
   );
